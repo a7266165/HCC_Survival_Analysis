@@ -1,9 +1,19 @@
+import logging
+from pathlib import Path
 import pandas as pd
-from utils.config_utils import load_data_config
+
+from utils.config_utils import load_data_config, DataConfig
+
+
+def setup_logging():
+    fmt = "%(asctime)s %(name)s [%(levelname)s] %(message)s"
+    logging.basicConfig(level=logging.INFO, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
 
 def main():
-
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("程式啟動，開始讀取設定檔")
     # Step 1: 讀取csv檔
     """
     輸入:
@@ -11,8 +21,17 @@ def main():
     輸出:
     - DataFrame: 包含csv檔內容的DataFrame
     """
-    cfg = load_data_config()
-    df = pd.read_csv(cfg["raw_data_path"])
+    config: DataConfig = load_data_config()
+    logger.debug("DataConfig 內容：%s", config)
+
+    # 檢查原始資料檔案
+    if not config.raw_data_path.exists():
+        logger.error("原始 CSV 不存在：%s", config.raw_data_path)
+        return
+
+    # 讀入資料
+    df = pd.read_csv(config.raw_data_path)
+    logger.info("成功讀取原始資料，共 %d 筆", len(df))
 
     # Step 2: 資料處理
     """
