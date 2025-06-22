@@ -1,6 +1,0 @@
-{
-    "base_dir": ".",
-    "raw_data_path": "dataset/raw/Liver_16388_39_features_4_label_20240910.csv",
-    "imputed_data_dir": "dataset/processed/imputed",
-    "augmented_data_dir": "dataset/processed/augmented"
-}

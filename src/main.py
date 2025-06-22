@@ -2,7 +2,8 @@ import logging
 from pathlib import Path
 import pandas as pd
 
-from utils.config_utils import load_data_config, DataConfig
+from utils.config_utils import load_dataset_config, DatasetConfig
+from preprocessing import data_preprocessor  # 假設 preprocesser.py 在 utils 資料夾中
 
 
 def setup_logging():
@@ -11,7 +12,10 @@ def setup_logging():
 
 
 def main():
+
+    # 設定logger
     setup_logging()
+    # 創建logger實例
     logger = logging.getLogger(__name__)
     logger.info("程式啟動，開始讀取設定檔")
     # Step 1: 讀取csv檔
@@ -21,16 +25,16 @@ def main():
     輸出:
     - DataFrame: 包含csv檔內容的DataFrame
     """
-    config: DataConfig = load_data_config()
-    logger.debug("DataConfig 內容：%s", config)
+    dataset_config: DatasetConfig = load_dataset_config()
+    logger.debug("DataConfig 內容：%s", dataset_config)
 
     # 檢查原始資料檔案
-    if not config.raw_data_path.exists():
-        logger.error("原始 CSV 不存在：%s", config.raw_data_path)
+    if not dataset_config.raw_dataset_path.exists():
+        logger.error("原始 CSV 不存在：%s", dataset_config.raw_dataset_path)
         return
 
     # 讀入資料
-    df = pd.read_csv(config.raw_data_path)
+    df = pd.read_csv(dataset_config.raw_dataset_path)
     logger.info("成功讀取原始資料，共 %d 筆", len(df))
 
     # Step 2: 資料處理

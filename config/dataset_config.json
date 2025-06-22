@@ -1,0 +1,5 @@
+{
+    "raw_dataset_path": "dataset/raw/Liver_16388_39_features_4_label_20240910.csv",
+    "imputed_dataset_dir": "dataset/processed/imputed",
+    "augmented_dataset_dir": "dataset/processed/augmented"
+}
