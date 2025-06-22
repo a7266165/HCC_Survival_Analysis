@@ -13,11 +13,11 @@ def setup_logging():
 
 def main():
 
-    # 設定logger
+    # step 0: 啟動logger
     setup_logging()
-    # 創建logger實例
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)  # 創建logger實例
     logger.info("程式啟動，開始讀取設定檔")
+
     # Step 1: 讀取csv檔
     """
     輸入:
@@ -26,14 +26,6 @@ def main():
     - DataFrame: 包含csv檔內容的DataFrame
     """
     dataset_config: DatasetConfig = load_dataset_config()
-    logger.debug("DataConfig 內容：%s", dataset_config)
-
-    # 檢查原始資料檔案
-    if not dataset_config.raw_dataset_path.exists():
-        logger.error("原始 CSV 不存在：%s", dataset_config.raw_dataset_path)
-        return
-
-    # 讀入資料
     df = pd.read_csv(dataset_config.raw_dataset_path)
     logger.info("成功讀取原始資料，共 %d 筆", len(df))
 
