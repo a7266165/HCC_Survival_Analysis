@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 import pandas as pd
 
-from utils.config_utils import load_dataset_config, DatasetConfig
-from preprocessing import data_preprocessor  # 假設 preprocesser.py 在 utils 資料夾中
+from utils.config_utils import load_dataset_config, load_preprocess_config
+from preprocessing.preprocessor import data_preprocessor
 
 
 def setup_logging():
@@ -25,7 +25,7 @@ def main():
     輸出:
     - DataFrame: 包含csv檔內容的DataFrame
     """
-    dataset_config: DatasetConfig = load_dataset_config()
+    dataset_config = load_dataset_config()
     df = pd.read_csv(dataset_config.raw_dataset_path)
     logger.info("成功讀取原始資料，共 %d 筆", len(df))
 
@@ -36,14 +36,11 @@ def main():
     
     輸出:
     - DataFrame: 處理後的DataFrame
-    
-    處理方式:
-    (1) 不做任何處理
-    (2) 將DataFrame中的所有缺失值填充為0，不做擴充
-    (3) 將DataFrame中的所有缺失值填充為0，擴充N倍
-    (4) 訓練MIDA填充模型，並使用該模型填充DataFrame中的所有缺失值，不做擴充
-    (5) 訓練MIDA填充模型，並使用該模型填充DataFrame中的所有缺失值，擴充N倍    
     """
+    preprocess_config = load_preprocess_config()
+    processed_df = data_preprocessor(df, preprocess_config)
+    logger.info("資料處理完成，共 %d 筆", len(processed_df))
+
     # Step 3: 進行實驗
     """
     輸入:
