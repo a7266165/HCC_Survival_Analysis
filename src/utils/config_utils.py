@@ -28,12 +28,26 @@ class DatasetConfig:
 
 
 @dataclass(frozen=True)
-class PreprocessConfig:
-    num_feats: Tuple[str, ...]
-    cat_feats: Tuple[str, ...]
-    keep_feats: Tuple[str, ...]
+class FeatureConfig:
+    num_features: Tuple[str, ...]
+    cat_features: Tuple[str, ...]
+    keep_features: Tuple[str, ...]
     treatments: Tuple[str, ...]
     labels: Tuple[str, ...]
+
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "FeatureConfig":
+        return FeatureConfig(
+            num_features=tuple(cfg["num_features"]),
+            cat_features=tuple(cfg["cat_features"]),
+            keep_features=tuple(cfg["keep_features"]),
+            treatments=tuple(cfg["treatments"]),
+            labels=tuple(cfg["labels"]),
+        )
+
+
+@dataclass(frozen=True)
+class PreprocessConfig:
     is_preprocess: bool
     impute_method: str
     is_augment: bool
@@ -42,11 +56,6 @@ class PreprocessConfig:
     @classmethod
     def from_dict(cls, cfg: dict) -> "PreprocessConfig":
         return PreprocessConfig(
-            num_feats=tuple(cfg["num_feats"]),
-            cat_feats=tuple(cfg["cat_feats"]),
-            keep_feats=tuple(cfg["keep_feats"]),
-            treatments=tuple(cfg["treatments"]),
-            labels=tuple(cfg["labels"]),
             is_preprocess=cfg["is_preprocess"],
             impute_method=cfg["impute_method"],
             is_augment=cfg["is_augment"],
@@ -67,14 +76,19 @@ class ExperimentConfig:
 
 _CONFIG_CLASSES = {
     "dataset_config": DatasetConfig,
+    "feature_config": FeatureConfig,
     "preprocess_config": PreprocessConfig,
     "experiment_config": ExperimentConfig,
 }
-ConfigName = Literal["dataset_config", "preprocess_config", "experiment_config"]
+ConfigName = Literal[
+    "dataset_config", "feature_config", "preprocess_config", "experiment_config"
+]
 
 
 @overload
 def load_config(cfg_name: Literal["dataset_config"]) -> DatasetConfig: ...
+@overload
+def load_config(cfg_name: Literal["feature_config"]) -> FeatureConfig: ...
 @overload
 def load_config(cfg_name: Literal["preprocess_config"]) -> PreprocessConfig: ...
 @overload
@@ -84,7 +98,7 @@ def load_config(cfg_name: Literal["experiment_config"]) -> ExperimentConfig: ...
 @lru_cache(maxsize=None)
 def load_config(
     cfg_name: ConfigName,
-) -> Union[DatasetConfig, PreprocessConfig, ExperimentConfig]:
+) -> Union[DatasetConfig, FeatureConfig, PreprocessConfig, ExperimentConfig]:
 
     if cfg_name not in _CONFIG_CLASSES:
         raise ValueError(f"未知的配置類型: {cfg_name}")

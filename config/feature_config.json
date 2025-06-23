@@ -1,0 +1,63 @@
+{
+    "num_features": [
+        "age",
+        "BMI",
+        "total_bilirubin",
+        "AFP",
+        "INR",
+        "creatine",
+        "maximal_tumor_size",
+        "albumin",
+        "GPT",
+        "hemoglobin",
+        "platelet_count"
+    ],
+    "cat_features": [
+        "sex",
+        "PS",
+        "tumor_number",
+        "HBV",
+        "HCV",
+        "childPugh_class",
+        "metastatsis",
+        "lymphonodules",
+        "EHS",
+        "MVI",
+        "cirrhosis",
+        "DM",
+        "HTN",
+        "ESRD",
+        "CKD",
+        "ascites",
+        "tumor_distribution",
+        "encephalopathy",
+        "BCLC_stage"
+    ],
+    "keep_features": [
+        "sex",
+        "BCLC_stage",
+        "age",
+        "EHS",
+        "metastatsis",
+        "maximal_tumor_size",
+        "lymphonodules",
+        "MVI"
+    ],
+    "treatments": [
+        "liver_transplantation",
+        "surgical_resection",
+        "radiofrequency",
+        "TACE",
+        "target_therapy",
+        "immunotherapy",
+        "HAIC",
+        "radiotherapy",
+        "best_support_care"
+    ],
+    "labels": [
+        "label",
+        "hospital",
+        "event",
+        "time"
+    ]
+}

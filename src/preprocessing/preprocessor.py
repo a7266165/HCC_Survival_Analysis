@@ -1,31 +1,38 @@
 import pandas as pd
 import logging
 from typing import Callable, Dict
-from utils.config_utils import PreprocessConfig
+from utils.config_utils import PreprocessConfig, FeatureConfig
 
 logger = logging.getLogger(__name__)
+
 
 # 定義各種 impute 策略
 def _impute_zero(df: pd.DataFrame, feats: list[str]) -> pd.DataFrame:
     return df.fillna(0)
 
+
 def _impute_mode(df: pd.DataFrame, feats: list[str]) -> pd.DataFrame:
     mode_map = {f: df[f].mode().iloc[0] for f in feats}
     return df.fillna(value=mode_map)
+
 
 def _impute_median(df: pd.DataFrame, feats: list[str]) -> pd.DataFrame:
     median_map = {f: df[f].median() for f in feats}
     return df.fillna(value=median_map)
 
+
 IMPUTE_STRATEGIES: Dict[str, Callable[[pd.DataFrame, list[str]], pd.DataFrame]] = {
-    "zero":   _impute_zero,
-    "mode":   _impute_mode,
+    "zero": _impute_zero,
+    "mode": _impute_mode,
     "median": _impute_median,
     # "mean": _impute_mean,
     # "mida": _impute_mida,
 }
 
-def data_preprocessor(df: pd.DataFrame, preprocess_config: PreprocessConfig) -> pd.DataFrame:
+
+def data_preprocessor(
+    df: pd.DataFrame, feature_config: FeatureConfig, preprocess_config: PreprocessConfig
+) -> pd.DataFrame:
     """
     處理DataFrame中的缺失值，並根據設定進行擴充。
 
@@ -53,13 +60,15 @@ def data_preprocessor(df: pd.DataFrame, preprocess_config: PreprocessConfig) -> 
 
     # step 2: 根據設定進行資料處理
     # TODO: 實作填補平均數與訓練MIDA模型填補特徵
-    feats = preprocess_config.num_feats + preprocess_config.cat_feats
+    feats = feature_config.num_features + feature_config.cat_features
     method = preprocess_config.impute_method
     try:
         imputer = IMPUTE_STRATEGIES[method]
     except KeyError:
         logger.error("不支援%s，只支援zero, mode, median, mean, mida", method)
-        raise ValueError(f"Unsupported impute method: {method}, only support zero, mode, median, mean, mida") from None
+        raise ValueError(
+            f"Unsupported impute method: {method}, only support zero, mode, median, mean, mida"
+        ) from None
     preprocess_df = imputer(preprocess_df, feats)
 
     # step 3: 檢查是否需要擴充資料
