@@ -54,10 +54,12 @@
         "radiotherapy",
         "best_support_care"
     ],
-    "labels": [
-        "label",
-        "hospital",
+    "survival_labels": [
         "event",
         "time"
+    ],
+    "other_labels": [
+        "label",
+        "hospital"
     ]
 }
