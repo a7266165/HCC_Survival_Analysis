@@ -1,9 +1,15 @@
 import logging
 from pathlib import Path
 import pandas as pd
+from datetime import datetime
 
-from utils.config_utils import load_dataset_config, load_preprocess_config
+from utils.config_utils import load_config
 from preprocessing.preprocessor import data_preprocessor
+from experimenting.experimentor import single_experimentor
+
+logging.getLogger("shap").setLevel(logging.WARNING)
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
+logging.getLogger("sklearn").setLevel(logging.WARNING)
 
 
 def setup_logging():
@@ -25,7 +31,7 @@ def main():
     輸出:
     - DataFrame: 包含csv檔內容的DataFrame
     """
-    dataset_config = load_dataset_config()
+    dataset_config = load_config("dataset_config")
     df = pd.read_csv(dataset_config.raw_dataset_path)
     logger.info("成功讀取原始資料，共 %d 筆", len(df))
 
@@ -37,8 +43,9 @@ def main():
     輸出:
     - DataFrame: 處理後的DataFrame
     """
-    preprocess_config = load_preprocess_config()
-    processed_df = data_preprocessor(df, preprocess_config)
+    feature_config = load_config("feature_config")
+    preprocess_config = load_config("preprocess_config")
+    processed_df = data_preprocessor(df, feature_config, preprocess_config)
     logger.info("資料處理完成，共 %d 筆", len(processed_df))
 
     # Step 3: 進行實驗
@@ -51,21 +58,36 @@ def main():
     實驗內容:
     將處理後的DataFrame分成訓練集和測試集，使用訓練集訓練模型，並在測試集上進行評估。
     """
+    experiment_config = load_config("experiment_config")
+    survival_model_config = load_config("survival_model_config")
 
-    # Step 4: 整合實驗結果
-    """
-    將多次實驗的結果整合成一個DataFrame，綜合評估
+    total_experiments_result = []
 
-    
-    評估指標包括
-    (1) C-Index
-    (2) 模型預測的存活時間
-    (3) SHAP值
-    (4) right-censored的正確比例
-    (5) non-censored的正確比例
-    (6) 調整BMI
-    (7) 調整治療手段
+    for model_type in experiment_config.models_to_train:
+        logger.info(f"開始實驗模型: {model_type}")
+        for random_seed in range(experiment_config.num_experiments):
+            single_experiment_result = single_experimentor(
+                processed_df,
+                preprocess_config.is_preprocess,
+                feature_config,
+                random_seed,
+                model_type,
+                survival_model_config,
+            )
+            total_experiments_result.append(single_experiment_result)
+    logger.info("所有實驗完成，共 %d 筆資料", len(total_experiments_result))
+    # Step 4: 儲存實驗結果
     """
+    輸入:total_experiments_result
+    輸出:實驗結果儲存到指定路徑
+    """
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_df = pd.DataFrame(total_experiments_result)
+    result_path = Path(experiment_config.result_save_path)
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    save_path = result_path.with_name(f"{result_path.stem}_{ts}{result_path.suffix}")
+    result_df.to_csv(save_path, index=False)
+    logger.info(f"結果已儲存到 {save_path}")
 
 
 if __name__ == "__main__":

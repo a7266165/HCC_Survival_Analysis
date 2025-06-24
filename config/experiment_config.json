@@ -1,0 +1,9 @@
+{
+    "num_experiments": 2,
+    "models_to_train": [
+        "CoxPHFitter",
+        "XGBoost_AFT",
+        "CatBoost"
+    ],
+    "result_save_path": "results/experiment_results.json"
+}
