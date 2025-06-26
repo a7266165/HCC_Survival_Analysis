@@ -1,5 +1,5 @@
 {
-    "num_experiments": 2,
+    "num_experiments": 100,
     "models_to_train": [
         "CoxPHFitter",
         "XGBoost_AFT",
