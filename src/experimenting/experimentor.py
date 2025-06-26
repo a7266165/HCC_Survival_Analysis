@@ -29,7 +29,6 @@ class ExperimentResult:
     model: Any
     shap_results: Dict[str, Any]
     feature_importance: Dict[str, Dict[str, float]]
-    # 新增：校正結果
     calibrated_test_predictions: Dict[str, pd.DataFrame] = field(default_factory=dict)
     calibrated_test_c_index: Dict[str, float] = field(default_factory=dict)
 
@@ -481,8 +480,12 @@ def calibrate_predictions_knn_km(
         # 找到生存機率為0.5的時間點
         try:
             median_survival = kmf.median_survival_time_
-            if pd.isna(median_survival):
-                median_survival = row["predicted_survival_time"]
+            if pd.isna(median_survival) or np.isinf(median_survival):
+                # 使用鄰居的平均預測值作為後備方案
+                median_survival = neighbor_data["predicted_survival_time"].mean()
+                if pd.isna(median_survival) or np.isinf(median_survival):
+                    # 如果還是有問題，使用原始預測值
+                    median_survival = row["predicted_survival_time"]
         except:
             median_survival = row["predicted_survival_time"]
 

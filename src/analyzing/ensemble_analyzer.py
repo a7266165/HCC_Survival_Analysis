@@ -25,6 +25,9 @@ def _find_result_directory(experiment_config: ExperimentConfig, ts: str) -> Path
     result_path = Path(experiment_config.result_save_path)
     base_name = result_path.stem
     result_dir = result_path.parent / f"{base_name}_{ts}"
+    # 如果目錄不存在，則創建它
+    if not result_dir.exists():
+        result_dir.mkdir(parents=True, exist_ok=True)
     return result_dir
 
 
@@ -186,19 +189,15 @@ def calculate_ensemble_metrics(
     metrics = {}
 
     for key, pred_df in ensemble_predictions.items():
-        # 解析 key 以獲取 model_type 和 calibration_method
-        if "_" in key and key.split("_")[-1] in [
-            "knn_km",
-            "regression",
-            "segmental",
-            "curve",
-        ]:
-            parts = key.rsplit("_", 1)
-            model_type = parts[0]
-            calibration_method = parts[1]
-        else:
-            model_type = key
-            calibration_method = "original"
+        calibration_methods = ["knn_km", "regression", "segmental", "curve"]
+        model_type = key
+        calibration_method = "original"
+
+        for method in calibration_methods:
+            if key.endswith(f"_{method}"):
+                model_type = key[: -len(f"_{method}")]
+                calibration_method = method
+                break
 
         # 合併預測與真實數據
         merged = pred_df.merge(true_data, on="patient_id")
@@ -328,6 +327,7 @@ def analyze_survival_predictions(
     """
     分析生存預測結果，支援校正後的數據
     """
+    calibration_methods = ["knn_km", "regression", "segmental", "curve"]
     true = processed_df[["patient_id", "time", "event"]]
     results: Dict[str, Dict[str, Any]] = {}
 
@@ -342,18 +342,14 @@ def analyze_survival_predictions(
         stats: Dict[str, Any] = {"key": key}
 
         # 解析 model_type 和 calibration_method
-        if "_" in key and key.split("_")[-1] in [
-            "knn_km",
-            "regression",
-            "segmental",
-            "curve",
-        ]:
-            parts = key.rsplit("_", 1)
-            stats["model_type"] = parts[0]
-            stats["calibration_method"] = parts[1]
-        else:
-            stats["model_type"] = key
-            stats["calibration_method"] = "original"
+        stats["model_type"] = key
+        stats["calibration_method"] = "original"
+
+        for method in calibration_methods:
+            if key.endswith(f"_{method}"):
+                stats["model_type"] = key[: -len(f"_{method}")]
+                stats["calibration_method"] = method
+                break
 
         if len(non_censored) > 0:
             errors = non_censored["ensemble_prediction"] - non_censored["time"]
