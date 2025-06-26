@@ -413,73 +413,168 @@ def analyze_survival_predictions(
 def create_stage_treatment_shap_table(
     ensemble_importance: Dict[str, pd.DataFrame],
     processed_df: pd.DataFrame,
-    stage_col: str,
-    treatment_cols: List[str],
+    stage_col: str = "BCLC_stage",
+    treatment_cols: List[str] = None,
+    confidence_level: float = 0.95,
 ) -> pd.DataFrame:
     """
-    創建stage x treatment的患者數統計表，並附加整體SHAP值
-    注意：SHAP值是對整體特徵計算的，不是按stage分別計算
+    創建stage x treatment的pivot table，每格顯示SHAP值的信心區間
+    
+    Returns:
+        DataFrame: index為stage，columns為treatment，值為信心區間字串
     """
+    if treatment_cols is None:
+        treatment_cols = [
+            "liver_transplantation",
+            "surgical_resection", 
+            "radiofrequency",
+            "TACE",
+            "target_therapy",
+            "immunotherapy",
+            "HAIC",
+            "radiotherapy",
+            "best_support_care",
+        ]
 
     # 獲取SHAP數據
     shap_values = {}
     if ensemble_importance:
-        model_type = list(ensemble_importance.keys())[0]
-        shap_data = ensemble_importance[model_type]
-        shap_data = shap_data[shap_data["method"] == "shap_importance"]
+        # 收集所有模型的SHAP值
+        all_shap_data = []
+        for model_type, importance_df in ensemble_importance.items():
+            shap_data = importance_df[importance_df["method"] == "shap_importance"]
+            shap_data['model_type'] = model_type
+            all_shap_data.append(shap_data)
+        
+        if all_shap_data:
+            combined_shap = pd.concat(all_shap_data, ignore_index=True)
+            
+            # 計算每個治療的整體統計
+            for treatment in treatment_cols:
+                treatment_shap = combined_shap[combined_shap["feature"] == treatment]
+                if not treatment_shap.empty:
+                    values_array = treatment_shap["mean_importance"].values
+                    mean_val = values_array.mean()
+                    n = len(values_array)
+                    
+                    if n > 1:
+                        std_val = values_array.std(ddof=1)
+                        from scipy import stats
+                        ci_margin = stats.t.ppf((1 + confidence_level) / 2, n - 1) * std_val / np.sqrt(n)
+                        ci_lower = mean_val - ci_margin
+                        ci_upper = mean_val + ci_margin
+                    else:
+                        ci_lower = ci_upper = mean_val
+                    
+                    shap_values[treatment] = {
+                        "mean": mean_val,
+                        "ci_lower": ci_lower,
+                        "ci_upper": ci_upper,
+                        "ci_string": f"{mean_val:.3f} [{ci_lower:.3f}, {ci_upper:.3f}]"
+                    }
+                if not treatment_shap.empty:
+                    mean_val = treatment_shap["mean_importance"].mean()
+                    std_val = treatment_shap["mean_importance"].std()
+                    n = len(treatment_shap)
+                    
+                    # 計算信心區間
+                    if n > 1:
+                        from scipy import stats
+                        ci_margin = stats.t.ppf((1 + confidence_level) / 2, n - 1) * std_val / np.sqrt(n)
+                        ci_lower = mean_val - ci_margin
+                        ci_upper = mean_val + ci_margin
+                    else:
+                        ci_lower = ci_upper = mean_val
+                    
+                    shap_values[treatment] = {
+                        "mean": mean_val,
+                        "ci_lower": ci_lower,
+                        "ci_upper": ci_upper,
+                        "ci_string": f"{mean_val:.3f} [{ci_lower:.3f}, {ci_upper:.3f}]"
+                    }
 
-        # 建立治療方式到SHAP值的映射
-        for _, row in shap_data.iterrows():
-            treatment = row["feature"]
-            if treatment in treatment_cols:
-                shap_values[treatment] = {
-                    "mean": row["mean_importance"],
-                    "std": row["std_importance"],
-                }
-
-    # 統計各stage的治療患者數
+    # 建立pivot table的數據
     stages = sorted(processed_df[stage_col].unique())
-
+    pivot_data = []
+    
     for stage in stages:
+        stage_data = {"Stage": stage}
         stage_patients = processed_df[processed_df[stage_col] == stage]
-
+        
         for treatment in treatment_cols:
             if treatment not in processed_df.columns:
+                stage_data[treatment] = "N/A"
                 continue
+            
+            # 計算該stage中接受該治療的患者數和比例
+            treatment_count = (stage_patients[treatment] == 1).sum()
+            stage_total = len(stage_patients)
+            percentage = (treatment_count / stage_total * 100) if stage_total > 0 else 0
+            
+            # 組合患者統計和SHAP信心區間
+            if treatment in shap_values:
+                shap_ci = shap_values[treatment]["ci_string"]
+                cell_value = f"{treatment_count}/{stage_total} ({percentage:.1f}%)\nSHAP: {shap_ci}"
+            else:
+                cell_value = f"{treatment_count}/{stage_total} ({percentage:.1f}%)\nSHAP: N/A"
+            
+            stage_data[treatment] = cell_value
+        
+        pivot_data.append(stage_data)
+    
+    # 轉換為DataFrame
+    pivot_df = pd.DataFrame(pivot_data)
+    pivot_df = pivot_df.set_index("Stage")
+    
+    # 確保treatment順序一致
+    pivot_df = pivot_df[treatment_cols]
+    
+    return pivot_df
 
-            # 計算該stage中接受該治療的患者數
-            treatment_patients = stage_patients[stage_patients[treatment] == 1]
-            count = len(treatment_patients)
 
-            # 建立統計記錄
-            stat_record = {
-                "Stage": stage,
-                "Treatment": treatment,
-                "Patient_Count": count,
-                "Stage_Total": len(stage_patients),
-                "Percentage": (
-                    f"{count/len(stage_patients)*100:.1f}%"
-                    if len(stage_patients) > 0
-                    else "0.0%"
-                ),
-            }
-
-    return {}
-
-
+def create_stage_treatment_shap_summary(
+    pivot_table: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    """
+    創建更易讀的Stage x Treatment摘要表
+    分別儲存患者統計和SHAP值
+    """
+    # 分離患者統計和SHAP值
+    patient_stats = pivot_table.copy()
+    shap_stats = pivot_table.copy()
+    
+    for col in pivot_table.columns:
+        for idx in pivot_table.index:
+            cell_value = str(pivot_table.loc[idx, col])
+            if "\n" in cell_value:
+                parts = cell_value.split("\n")
+                patient_stats.loc[idx, col] = parts[0]
+                shap_stats.loc[idx, col] = parts[1].replace("SHAP: ", "") if len(parts) > 1 else "N/A"
+            else:
+                patient_stats.loc[idx, col] = cell_value
+                shap_stats.loc[idx, col] = "N/A"
+    
+    # 儲存兩個表格
+    patient_stats.to_csv(output_path.parent / "stage_treatment_patient_stats.csv")
+    shap_stats.to_csv(output_path.parent / "stage_treatment_shap_stats.csv")
+    
+    # 儲存合併表格
+    pivot_table.to_csv(output_path)
 # ========================================
 # 4. 治療方式調整器 (修正版)
 # ========================================
 
 
 def analyze_treatment_modifications(
-    experiment_results: List[Dict[str, Any]],
+    experiment_results: List[ExperimentResult],  # 改為ExperimentResult類型
     processed_df: pd.DataFrame,
     stage_col: str = "BCLC_stage",
     treatment_cols: List[str] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
-    分析治療方式調整對預測的影響（使用已訓練的模型）
+    分析治療方式調整對預測的影響（使用所有訓練的模型）
+    對每個模型的測試集進行what-if分析
     """
     logger.info("分析治療方式調整影響...")
 
@@ -496,70 +591,97 @@ def analyze_treatment_modifications(
             "best_support_care",
         ]
 
-    # 獲取第一個可用的模型和測試集
-    model_info = None
-    for result in experiment_results:
-        if result and "model" in result and "test_indices" in result:
-            model_info = result
-            break
+    all_modification_results = {}
+    
+    # 對每個實驗結果進行分析
+    for exp_idx, exp_result in enumerate(experiment_results):
+        if not exp_result or not exp_result.model:
+            continue
+            
+        logger.info(f"分析模型 {exp_result.model_type} (實驗 {exp_idx})")
+        
+        model = exp_result.model
+        
+        # 從該模型的測試集預測中獲取患者ID
+        test_patient_ids = exp_result.test_predictions['patient_id'].unique()
+        test_df = processed_df[processed_df['patient_id'].isin(test_patient_ids)].copy()
+        
+        # 獲取特徵列
+        if hasattr(model, 'feature_names_'):
+            feature_cols = list(model.feature_names_)
+        elif hasattr(model, 'get_booster') and hasattr(model.get_booster(), 'feature_names'):
+            # XGBoost
+            feature_cols = model.get_booster().feature_names
+        elif hasattr(model, 'feature_names'):
+            # XGBoost Booster 物件
+            feature_cols = model.feature_names
+        else:
+            # 從feature_importance獲取特徵名稱
+            # 優先使用 model_importance，如果沒有就用其他方法
+            for method in ['xgb_gain', 'xgb_weight', 'catboost_prediction', 'cox_coefficients', 'shap_importance']:
+                if method in exp_result.feature_importance:
+                    feature_cols = list(exp_result.feature_importance[method].keys())
+                    break
+            else:
+                feature_cols = []
+        
+        feature_cols = [col for col in feature_cols if col in test_df.columns]
+        
+        if not feature_cols:
+            logger.warning(f"無法獲取模型 {exp_idx} 的特徵列")
+            continue
 
-    if not model_info:
-        logger.warning("找不到可用的模型進行治療調整分析")
-        return {}
+        # 按stage分析
+        model_modifications = {}
+        
+        for stage in test_df[stage_col].unique():
+            stage_patients = test_df[test_df[stage_col] == stage]
+            stage_results = []
 
-    model = model_info["model"]
-    test_indices = model_info["test_indices"]
-    test_df = processed_df.iloc[test_indices].copy()
+            for idx, patient in stage_patients.iterrows():
+                patient_id = patient["patient_id"]
+                current_treatments = {
+                    col: patient[col] for col in treatment_cols 
+                    if col in patient.index and col in feature_cols
+                }
 
-    # 確保特徵列存在
-    feature_cols = [
-        col for col in model_info.get("feature_columns", []) if col in test_df.columns
-    ]
-
-    modification_results = {}
-
-    # 按stage分析
-    for stage in test_df[stage_col].unique():
-        stage_patients = test_df[test_df[stage_col] == stage]
-        stage_results = []
-
-        for idx, patient in stage_patients.iterrows():
-            patient_id = patient["patient_id"]
-            current_treatments = {
-                col: patient[col] for col in treatment_cols if col in patient.index
-            }
-
-            # 原始預測
-            try:
-                X_original = patient[feature_cols].values.reshape(1, -1)
-                original_pred = model.predict(X_original)[0]
-            except Exception as e:
-                logger.warning(f"預測患者 {patient_id} 失敗: {e}")
-                continue
-
-            # 嘗試每種治療調整
-            for treatment in treatment_cols:
-                if treatment not in feature_cols:
+                # 原始預測
+                try:
+                    X_original = patient[feature_cols].values.reshape(1, -1)
+                    
+                    if exp_result.model_type == "XGBoost_AFT":
+                        import xgboost as xgb
+                        dmatrix_original = xgb.DMatrix(X_original)
+                        original_pred = model.predict(dmatrix_original)[0]
+                    else:
+                        original_pred = model.predict(X_original)[0]
+                except Exception as e:
+                    logger.warning(f"預測患者 {patient_id} 失敗: {e}")
                     continue
 
-                # 創建調整後的特徵
-                X_modified = X_original.copy()
-                treatment_idx = feature_cols.index(treatment)
+                # 嘗試每種治療調整
+                for treatment in treatment_cols:
+                    if treatment not in feature_cols:
+                        continue
 
-                # 關閉當前治療，開啟新治療
-                for i, col in enumerate(feature_cols):
-                    if col in treatment_cols:
-                        X_modified[0, i] = 1 if col == treatment else 0
+                    # 創建調整後的特徵
+                    X_modified = X_original.copy()
+                    
+                    # 關閉所有當前治療，只開啟目標治療
+                    for i, col in enumerate(feature_cols):
+                        if col in treatment_cols:
+                            X_modified[0, i] = 1.0 if col == treatment else 0.0
 
-                # 預測調整後的結果
-                try:
-                    modified_pred = model.predict(X_modified)[0]
+                    # 預測調整後的結果
+                    try:
+                        modified_pred = model.predict(X_modified)[0]
 
-                    # 記錄結果
-                    stage_results.append(
-                        {
+                        # 記錄結果
+                        stage_results.append({
                             "patient_id": patient_id,
                             "stage": stage,
+                            "model_type": exp_result.model_type,
+                            "experiment_idx": exp_idx,
                             "original_treatment": [
                                 k for k, v in current_treatments.items() if v == 1
                             ],
@@ -568,48 +690,60 @@ def analyze_treatment_modifications(
                             "modified_prediction": modified_pred,
                             "prediction_change": modified_pred - original_pred,
                             "relative_change": (
-                                (modified_pred - original_pred) / original_pred
+                                (modified_pred - original_pred) / original_pred * 100
                                 if original_pred != 0
                                 else 0
                             ),
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(f"調整預測失敗: {e}")
-                    continue
+                        })
+                    except Exception as e:
+                        logger.warning(f"調整預測失敗: {e}")
+                        continue
 
-        if stage_results:
-            stage_df = pd.DataFrame(stage_results)
-            # 按預測變化排序
-            stage_df = stage_df.sort_values("prediction_change", ascending=False)
-            modification_results[stage] = stage_df
+            if stage_results:
+                stage_df = pd.DataFrame(stage_results)
+                stage_df = stage_df.sort_values("prediction_change", ascending=False)
+                model_modifications[f"{exp_result.model_type}_{exp_idx}_stage_{stage}"] = stage_df
 
-            logger.info(f"Stage {stage}: 分析了 {len(stage_df)} 個治療調整")
-
-            # 顯示最大影響的調整
-            if len(stage_df) > 0:
-                max_change = stage_df.iloc[0]
-                logger.info(
-                    f"  最大正向變化: {max_change['new_treatment']} "
-                    f"(+{max_change['prediction_change']:.2f} months)"
-                )
-
-                min_change = stage_df.iloc[-1]
-                logger.info(
-                    f"  最大負向變化: {min_change['new_treatment']} "
-                    f"({min_change['prediction_change']:.2f} months)"
-                )
-
-    return modification_results
+        all_modification_results.update(model_modifications)
+    
+    # 彙總分析結果
+    summary_results = {}
+    
+    # 按stage彙總所有模型的結果
+    all_stages = set()
+    for key in all_modification_results:
+        if "_stage_" in key:
+            stage = key.split("_stage_")[-1]
+            all_stages.add(stage)
+    
+    for stage in sorted(all_stages):
+        stage_dfs = []
+        for key, df in all_modification_results.items():
+            if f"_stage_{stage}" in key:
+                stage_dfs.append(df)
+        
+        if stage_dfs:
+            # 合併所有模型對該stage的分析
+            combined_df = pd.concat(stage_dfs, ignore_index=True)
+            
+            # 計算每種治療調整的平均影響
+            treatment_summary = combined_df.groupby('new_treatment').agg({
+                'prediction_change': ['mean', 'std', 'count'],
+                'relative_change': ['mean', 'std']
+            }).round(2)
+            
+            summary_results[f"stage_{stage}_summary"] = treatment_summary
+            summary_results[f"stage_{stage}_detailed"] = combined_df
+    
+    return summary_results
 
 
 # ========================================
 # 5. 變數調整器 (修正版)
 # ========================================
 
-
 def analyze_bmi_modifications(
-    experiment_results: List[Dict[str, Any]],
+    experiment_results: List[ExperimentResult],  # 改為ExperimentResult類型
     processed_df: pd.DataFrame,
     bmi_col: str = "BMI",
 ) -> Dict[str, Any]:
@@ -622,10 +756,10 @@ def analyze_bmi_modifications(
         logger.warning(f"找不到BMI列: {bmi_col}")
         return {"message": f"找不到BMI列: {bmi_col}"}
 
-    # 獲取第一個可用的模型和測試集
+    # 獲取第一個可用的模型
     model_info = None
     for result in experiment_results:
-        if result and "model" in result and "test_indices" in result:
+        if result and result.model:
             model_info = result
             break
 
@@ -633,18 +767,34 @@ def analyze_bmi_modifications(
         logger.warning("找不到可用的模型進行BMI調整分析")
         return {"message": "找不到可用的模型"}
 
-    model = model_info["model"]
-    test_indices = model_info["test_indices"]
-    test_df = processed_df.iloc[test_indices].copy()
-    feature_cols = [
-        col for col in model_info.get("feature_columns", []) if col in test_df.columns
-    ]
+    model = model_info.model
+    
+    # 從測試集預測中獲取患者ID
+    test_patient_ids = model_info.test_predictions['patient_id'].unique()
+    test_df = processed_df[processed_df['patient_id'].isin(test_patient_ids)].copy()
+    
+    # 獲取特徵列
+    if hasattr(model, 'feature_names_'):
+        feature_cols = list(model.feature_names_)
+    elif hasattr(model, 'feature_names'):
+        # XGBoost Booster 物件
+        feature_cols = model.feature_names
+    else:
+        # 從feature_importance獲取特徵名稱
+        for method in ['xgb_gain', 'xgb_weight', 'catboost_prediction', 'cox_coefficients', 'shap_importance']:
+            if method in model_info.feature_importance:
+                feature_cols = list(model_info.feature_importance[method].keys())
+                break
+        else:
+            feature_cols = []
+    
+    feature_cols = [col for col in feature_cols if col in test_df.columns]
 
     if bmi_col not in feature_cols:
         logger.warning(f"BMI不在模型特徵中")
         return {"message": "BMI不在模型特徵中"}
 
-    # BMI分組分析
+    # BMI分組分析（以下邏輯保持不變）
     bmi_values = test_df[bmi_col].dropna()
     min_bmi = int(np.floor(bmi_values.min()))
     max_bmi = int(np.ceil(bmi_values.max()))
@@ -791,3 +941,4 @@ def analyze_bmi_modifications(
         }
     else:
         return {"message": "沒有足夠的數據進行BMI分析"}
+

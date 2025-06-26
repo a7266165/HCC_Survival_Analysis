@@ -731,7 +731,7 @@ def apply_calibration_to_experiment(
 
 # TODO: 儲存模組，之後要精簡該部份
 def save_experiment_results(
-    total_experiments_result: List[Dict[str, Any]],
+    total_experiments_result: List[ExperimentResult],  # 修正類型
     experiment_config,
     ts: str,
 ) -> Dict[str, Path]:
@@ -739,9 +739,9 @@ def save_experiment_results(
     精簡版實驗結果儲存函數
 
     Args:
-        total_experiments_result: 實驗結果列表
+        total_experiments_result: 實驗結果列表（ExperimentResult物件）
         experiment_config: 實驗配置對象
-        include_models: 是否儲存模型對象
+        ts: 時間戳記
 
     Returns:
         Dict[str, Path]: 儲存文件的路徑
@@ -767,7 +767,7 @@ def save_experiment_results(
     return saved_files
 
 
-def _filter_valid_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _filter_valid_results(results: List[ExperimentResult]) -> List[ExperimentResult]:
     """過濾有效的實驗結果"""
     valid_results = []
     none_count = 0
@@ -777,9 +777,15 @@ def _filter_valid_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             none_count += 1
             continue
 
-        required_fields = ["model_type", "random_seed", "train_c_index", "test_c_index"]
-        if all(hasattr(result, field) for field in required_fields):
-            valid_results.append(result)
+        # 檢查是否為 ExperimentResult 實例
+        if isinstance(result, ExperimentResult):
+            # 檢查必要欄位是否有值
+            if (result.model_type and 
+                result.train_c_index is not None and 
+                result.test_c_index is not None):
+                valid_results.append(result)
+        else:
+            logger.warning(f"結果不是 ExperimentResult 類型: {type(result)}")
 
     total_count = len(results)
     valid_count = len(valid_results)
@@ -811,19 +817,29 @@ def _save_summary_excel(
 
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
         # 工作表1: 性能概覽
-        performance_df = pd.DataFrame(
-            [
-                {
-                    "Model_Type": r.model_type,
-                    "Random_Seed": r.random_seed,
+        performance_data = []
+        for idx, r in enumerate(results):
+            performance_data.append({
+                "Model_Type": r.model_type,
+                "Experiment_Index": idx,  # 使用索引代替 random_seed
+                "Train_C_Index": r.train_c_index,
+                "Test_C_Index": r.test_c_index,
+                "Performance_Gap": r.train_c_index - r.test_c_index,
+                "Prediction_Count": len(r.test_predictions),
+            })
+            
+            # 如果有校正結果，也加入
+            for method, c_index in r.calibrated_test_c_index.items():
+                performance_data.append({
+                    "Model_Type": f"{r.model_type}_{method}",
+                    "Experiment_Index": idx,
                     "Train_C_Index": r.train_c_index,
-                    "Test_C_Index": r.test_c_index,
-                    "Performance_Gap": r.train_c_index - r.test_c_index,
-                    "Prediction_Count": len(r.test_predictions),
-                }
-                for r in results
-            ]
-        ).round(4)
+                    "Test_C_Index": c_index,
+                    "Performance_Gap": r.train_c_index - c_index,
+                    "Prediction_Count": len(r.calibrated_test_predictions[method]),
+                })
+        
+        performance_df = pd.DataFrame(performance_data).round(4)
         performance_df.to_excel(writer, sheet_name="Performance", index=False)
 
         # 工作表2: 統計摘要
@@ -846,7 +862,7 @@ def _save_summary_excel(
         # 工作表3: 特徵重要性摘要（如果有的話）
         importance_df = _extract_feature_importance_summary(results)
         if not importance_df.empty:
-            importance_df.sort_values(["Model_Type", "Random_Seed", "Method"]).to_excel(
+            importance_df.sort_values(["Model_Type", "Experiment_Index", "Method"]).to_excel(
                 writer, sheet_name="Feature_Importance", index=False
             )
 
@@ -859,14 +875,13 @@ def _extract_feature_importance_summary(
     """提取所有特徵重要性方法的摘要（包含零重要性特徵）"""
     importance_data = []
 
-    for result in results:
+    for idx, result in enumerate(results):
         # 直接使用 dataclass 屬性存取
         feature_importance = result.feature_importance
         if not feature_importance:
             continue
 
         model_type = result.model_type
-        seed = result.random_seed
 
         # 儲存所有方法的特徵重要性（包含零值）
         for method_name, method_data in feature_importance.items():
@@ -875,7 +890,7 @@ def _extract_feature_importance_summary(
                     importance_data.append(
                         {
                             "Model_Type": model_type,
-                            "Random_Seed": seed,
+                            "Experiment_Index": idx,
                             "Method": method_name,
                             "Feature": feature,
                             "Importance": round(float(importance), 6),
@@ -892,16 +907,27 @@ def _save_predictions_csv(
     csv_path = result_dir / f"predictions_{ts}.csv"
 
     all_predictions = []
-    for result in results:
+    for idx, result in enumerate(results):
+        # 儲存原始預測
         test_predictions = result.test_predictions
         pred_df = test_predictions.copy()
         pred_df["model_type"] = result.model_type
-        pred_df["random_seed"] = result.random_seed
+        pred_df["experiment_index"] = idx
+        pred_df["calibration_method"] = "original"
         all_predictions.append(pred_df)
+        
+        # 儲存校正後的預測
+        for method, calibrated_df in result.calibrated_test_predictions.items():
+            cal_df = calibrated_df.copy()
+            cal_df["model_type"] = result.model_type
+            cal_df["experiment_index"] = idx
+            cal_df["calibration_method"] = method
+            all_predictions.append(cal_df)
 
     combined_df = pd.concat(all_predictions, ignore_index=True)
-    cols = ["model_type", "random_seed"] + [
-        col for col in combined_df.columns if col not in ["model_type", "random_seed"]
+    cols = ["model_type", "experiment_index", "calibration_method"] + [
+        col for col in combined_df.columns 
+        if col not in ["model_type", "experiment_index", "calibration_method"]
     ]
     combined_df = combined_df[cols]
     combined_df.to_csv(csv_path, index=False)
@@ -916,10 +942,10 @@ def _save_text_report(
     txt_path = result_dir / f"report_{ts}.txt"
 
     with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("實驗結果報告")
-        f.write("=" * 50 + "")
+        f.write("實驗結果報告\n")
+        f.write("=" * 50 + "\n")
         f.write(f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"實驗總數: {len(results)}\n")
+        f.write(f"實驗總數: {len(results)}\n\n")
 
         # 按模型分組統計
         model_groups: Dict[str, List[ExperimentResult]] = {}
@@ -928,18 +954,50 @@ def _save_text_report(
 
         for model_type, model_results in model_groups.items():
             test_scores = [r.test_c_index for r in model_results]
-            f.write(f"{model_type}:\n")
+            f.write(f"\n{model_type}:\n")
             f.write(f"  實驗次數: {len(model_results)}\n")
             f.write(f"  平均測試C-Index: {np.mean(test_scores):.4f}\n")
             f.write(f"  最佳測試C-Index: {np.max(test_scores):.4f}\n")
             f.write(f"  標準差: {np.std(test_scores):.4f}\n")
+            
+            # 校正結果統計
+            calibration_methods = set()
+            for r in model_results:
+                calibration_methods.update(r.calibrated_test_c_index.keys())
+                
+            for method in calibration_methods:
+                cal_scores = [
+                    r.calibrated_test_c_index.get(method) 
+                    for r in model_results 
+                    if method in r.calibrated_test_c_index
+                ]
+                cal_scores = [s for s in cal_scores if s is not None]
+                if cal_scores:
+                    f.write(f"  {method}校正後平均C-Index: {np.mean(cal_scores):.4f}\n")
 
         # 最佳結果
         best_result = max(results, key=lambda x: x.test_c_index)
-        f.write("最佳表現:\n")
+        f.write(f"\n最佳表現:\n")
         f.write(f"  模型: {best_result.model_type}\n")
-        f.write(f"  種子: {best_result.random_seed}\n")
         f.write(f"  測試C-Index: {best_result.test_c_index:.4f}\n")
+        
+        # 最佳校正結果
+        best_cal_result = None
+        best_cal_method = None
+        best_cal_score = 0
+        
+        for result in results:
+            for method, score in result.calibrated_test_c_index.items():
+                if score > best_cal_score:
+                    best_cal_score = score
+                    best_cal_result = result
+                    best_cal_method = method
+                    
+        if best_cal_result:
+            f.write(f"\n最佳校正表現:\n")
+            f.write(f"  模型: {best_cal_result.model_type}\n")
+            f.write(f"  校正方法: {best_cal_method}\n")
+            f.write(f"  校正後C-Index: {best_cal_score:.4f}\n")
 
     return txt_path
 
@@ -951,12 +1009,11 @@ def _save_models_pickle(
     models_dir = result_dir / "models"
     models_dir.mkdir(exist_ok=True)
 
-    for result in results:
+    for idx, result in enumerate(results):
         model = result.model
         if model is not None:
             model_type = result.model_type
-            seed = result.random_seed
-            model_path = models_dir / f"{model_type}_seed_{seed}.pkl"
+            model_path = models_dir / f"{model_type}_exp_{idx}.pkl"
 
             try:
                 with open(model_path, "wb") as f:
