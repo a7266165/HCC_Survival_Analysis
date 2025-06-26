@@ -58,8 +58,6 @@
         "event",
         "time"
     ],
-    "other_labels": [
-        "label",
-        "hospital"
-    ]
-}
+    "source": "hospital",
+    "patient_id": "patient_id"
+    }

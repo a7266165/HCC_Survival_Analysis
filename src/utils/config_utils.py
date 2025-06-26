@@ -34,7 +34,8 @@ class FeatureConfig:
     keep_features: Tuple[str, ...]
     treatments: Tuple[str, ...]
     survival_labels: Tuple[str, ...]
-    other_labels: Tuple[str, ...]
+    source:str
+    patient_id: str
 
     @classmethod
     def from_dict(cls, cfg: dict) -> "FeatureConfig":
@@ -44,7 +45,8 @@ class FeatureConfig:
             keep_features=tuple(cfg["keep_features"]),
             treatments=tuple(cfg["treatments"]),
             survival_labels=tuple(cfg["survival_labels"]),
-            other_labels=tuple(cfg["other_labels"]),
+            source=cfg["source"],
+            patient_id=cfg["patient_id"],
         )
 
 
@@ -79,9 +81,6 @@ class ExperimentConfig:
             result_save_path=_PROJECT_ROOT / cfg.get("result_save_path"),
         )
 
-
-# TODO: 實現 SurvivalModelConfig 的具體配置
-# 目前僅作為佔位符，實際配置應根據需求
 @dataclass(frozen=True)
 class SurvivalModelConfig:
     test_size: float
@@ -96,6 +95,21 @@ class SurvivalModelConfig:
             average_age=cfg["average_age"],
         )
 
+@dataclass(frozen=True)
+class analysisConfig:
+    ensemble_predictions_save_path: Path
+    K_U_metrics_save_path: Path
+    ensemble_feature_importance_save_path: Path
+    ensemble_c_index_save_path: Path
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "analysisConfig":
+        return analysisConfig(
+            ensemble_predictions_save_path=_PROJECT_ROOT / cfg["ensemble_predictions_save_path"],
+            K_U_metrics_save_path=_PROJECT_ROOT / cfg["K_U_metrics_save_path"],
+            ensemble_feature_importance_save_path=_PROJECT_ROOT / cfg["ensemble_feature_importance_save_path"],
+            ensemble_c_index_save_path=_PROJECT_ROOT / cfg["ensemble_c_index_save_path"],
+        )
+
 
 _CONFIG_CLASSES = {
     "dataset_config": DatasetConfig,
@@ -103,6 +117,7 @@ _CONFIG_CLASSES = {
     "preprocess_config": PreprocessConfig,
     "experiment_config": ExperimentConfig,
     "survival_model_config": SurvivalModelConfig,
+    "analysis_config": analysisConfig,
 }
 ConfigName = Literal[
     "dataset_config",
@@ -110,6 +125,7 @@ ConfigName = Literal[
     "preprocess_config",
     "experiment_config",
     "survival_model_config",
+    "analysis_config",
 ]
 
 
@@ -123,6 +139,8 @@ def load_config(cfg_name: Literal["preprocess_config"]) -> PreprocessConfig: ...
 def load_config(cfg_name: Literal["experiment_config"]) -> ExperimentConfig: ...
 @overload
 def load_config(cfg_name: Literal["survival_model_config"]) -> SurvivalModelConfig: ...
+@overload
+def load_config(cfg_name: Literal["analysis_config"]) -> analysisConfig: ...
 
 
 @lru_cache(maxsize=None)
@@ -134,8 +152,8 @@ def load_config(
     PreprocessConfig,
     ExperimentConfig,
     SurvivalModelConfig,
+    analysisConfig,
 ]:
-
     if cfg_name not in _CONFIG_CLASSES:
         raise ValueError(f"未知的配置類型: {cfg_name}")
 
