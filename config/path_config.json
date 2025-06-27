@@ -1,0 +1,18 @@
+{
+  "raw_dataset_name":               "raw/Liver_16388_39_features_4_label_20240910.csv",
+  "imputed_dataset_name":           "processed/imputed",
+  "augmented_dataset_name":         "processed/augmented",
+
+  "summary_save_name":              "summary.xlsx",
+  "origin_predictions_save_name":     "original_predictions/original_predictions_result.csv",
+  "report_save_name":               "report.txt",
+  "models_save_dir_name":           "models",
+
+  "ensemble_predictions_dir_name":      "ensemble_predictions",
+  "ensemble_feature_importance_dir_name":"ensemble_feature_importance",
+  "metrics_dir_name":                   "metrics",
+  "calibration_dir_name":              "calibration",
+  "K_U_group_metrics_save_name":        "K_U_group_metrics.csv",
+  "ensemble_c_index_save_name":         "ensemble_c_index.csv",
+  "calibration_comparison_save_name":   "calibration_comparison_overview.csv"
+}

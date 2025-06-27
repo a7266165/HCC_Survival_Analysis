@@ -12,7 +12,7 @@ from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
-from utils.config_utils import analysisConfig, ExperimentConfig
+from utils.config_utils import ExperimentConfig, PathConfig
 from experimenting.experimentor import ExperimentResult
 
 
@@ -20,21 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 # 跟experimentor.py中的ExperimentResult類似，之後再看怎麼整合
-def _find_result_directory(experiment_config: ExperimentConfig, ts: str) -> Path:
-    """尋找結果儲存目錄"""
-    result_path = Path(experiment_config.result_save_path)
-    base_name = result_path.stem
-    result_dir = result_path.parent / f"{base_name}_{ts}"
-    # 如果目錄不存在，則創建它
-    if not result_dir.exists():
-        result_dir.mkdir(parents=True, exist_ok=True)
-    return result_dir
-
-
 def ensemble_predictions_by_seed(
     experiment_results: List[ExperimentResult],
-    experiment_config: ExperimentConfig,
-    ts: str,
+    path_config: PathConfig,
     include_calibrated: bool = True,
 ) -> Dict[str, pd.DataFrame]:
     """
@@ -91,25 +79,23 @@ def ensemble_predictions_by_seed(
         ensemble_results.update(model_ensemble)
 
     # 儲存結果
-    result_dir = _find_result_directory(experiment_config, ts)
+    d = path_config.ensemble_predictions_dir
+    d.mkdir(parents=True, exist_ok=True)
     for key, df in ensemble_results.items():
-        save_path = result_dir / f"{key}_ensemble_predictions.csv"
-        df.to_csv(save_path, index=False)
+        df.to_csv(d / f"{key}_ensemble_predictions.csv", index=False)
+        logger.info("已儲存 Ensemble 預測: %s", d / f"{key}_ensemble_predictions.csv")
 
     return ensemble_results
 
 
 def ensemble_feature_importance(
     experiment_results: List[ExperimentResult],
-    experiment_config: ExperimentConfig,
-    ts: str,
+    path_config: PathConfig,
 ) -> Dict[str, pd.DataFrame]:
     """
     將特徵重要性平均
     注意：特徵重要性不受校正影響，所以保持原樣
     """
-    logger.info("開始計算 ensemble 特徵重要性...")
-
     # 收集所有特徵重要性數據
     rows = []
     for res in experiment_results:
@@ -160,11 +146,11 @@ def ensemble_feature_importance(
             ]
         ].sort_values(["method", "mean_importance"], ascending=[True, False])
 
-        # 儲存到CSV
-        result_dir = _find_result_directory(experiment_config, ts)
-        save_path = result_dir / f"{model_type}_ensemble_feature_importance.csv"
-        agg.to_csv(save_path, index=False)
-
+        # 儲存各模型的 feature importance
+        d = path_config.ensemble_feature_importance_dir
+        d.mkdir(parents=True, exist_ok=True)
+        df.to_csv(d / f"{model_type}.csv", index=False)
+        
     return ensemble_results
 
 
@@ -172,9 +158,7 @@ def calculate_ensemble_metrics(
     ensemble_predictions: Dict[str, pd.DataFrame],
     processed_df: pd.DataFrame,
     original_results: List[ExperimentResult],
-    experiment_config: ExperimentConfig,
-    ts: str,
-    include_calibrated: bool = True,
+    path_config: PathConfig,
 ) -> Dict[str, Dict[str, float]]:
     """
     計算 ensemble 指標，包括校正後的結果
@@ -251,15 +235,19 @@ def calculate_ensemble_metrics(
         }
 
     # 儲存 ensemble metrics
-    result_dir = _find_result_directory(experiment_config, ts)
+    d = path_config.metrics_dir
+    d.mkdir(parents=True, exist_ok=True)
     metrics_df = pd.DataFrame.from_dict(metrics, orient="index")
-    metrics_df.to_csv(result_dir / "ensemble_metrics_with_calibration.csv", index=True)
+    metrics_df.to_csv(path_config.ensemble_c_index_save_path, index=True)
+    logger.info("已儲存 Ensemble C-index 指標: %s", path_config.ensemble_c_index_save_path)
+
 
     return metrics
 
 
 def compare_calibration_methods(
-    results: Dict[str, Dict[str, Any]], experiment_config: ExperimentConfig, ts: str
+    results: Dict[str, Dict[str, Any]],
+    path_config: PathConfig,
 ) -> pd.DataFrame:
     """
     比較不同校正方法的效果
@@ -308,9 +296,10 @@ def compare_calibration_methods(
 
     if comparison_rows:
         comparison_df = pd.DataFrame(comparison_rows)
-        result_dir = _find_result_directory(experiment_config, ts)
-        comparison_df.to_csv(result_dir / "calibration_comparison.csv", index=False)
-        return comparison_df
+        d = path_config.calibration_dir
+        d.mkdir(parents=True, exist_ok=True)
+        comparison_df.to_csv(path_config.calibration_comparison_save_path, index=False)
+        logger.info("已儲存校正比較: %s", path_config.calibration_comparison_save_path)
 
     return pd.DataFrame()
 
@@ -321,8 +310,7 @@ def compare_calibration_methods(
 def analyze_survival_predictions(
     ensemble_predictions: Dict[str, pd.DataFrame],
     processed_df: pd.DataFrame,
-    experiment_config: ExperimentConfig,
-    ts: str,
+    path_config: PathConfig,
 ) -> Dict[str, Dict[str, Any]]:
     """
     分析生存預測結果，支援校正後的數據
@@ -374,9 +362,8 @@ def analyze_survival_predictions(
         results[key] = stats
 
     # 儲存分析結果
-    result_dir = _find_result_directory(experiment_config, ts)
-
-    # 轉換為 DataFrame 格式以便儲存
+    d = path_config.metrics_dir
+    d.mkdir(parents=True, exist_ok=True)
     rows = []
     for key, stats in results.items():
         row = {
@@ -395,12 +382,10 @@ def analyze_survival_predictions(
                 row[f"censored_{metric}"] = value
 
         rows.append(row)
-
-    if rows:
-        analysis_df = pd.DataFrame(rows)
-        analysis_df.to_csv(
-            result_dir / "survival_analysis_with_calibration.csv", index=False
-        )
+    analysis_df = pd.DataFrame(rows)
+    analysis_df.to_csv(
+        path_config.K_U_group_metrics_save_path, index=False
+    )
 
     return results
 

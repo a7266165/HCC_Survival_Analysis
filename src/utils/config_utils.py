@@ -2,29 +2,63 @@
 import json
 import logging
 from pathlib import Path
-from typing import Tuple, Union, overload, Literal
+from typing import Tuple, Union, overload, Literal, Dict, List, Optional
 from dataclasses import dataclass
 from functools import lru_cache
+from datetime import datetime
+
+ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 logger = logging.getLogger(__name__)
 
+# 根目錄、各子目錄
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_CONFIG_DIR = _PROJECT_ROOT / "config"
-
+_CONFIG_DIR  = _PROJECT_ROOT / "config"
+_DATASET_DIR = _PROJECT_ROOT / "dataset"
+_RESULTS_DIR = _PROJECT_ROOT / "results" / f"{ts}"
 
 @dataclass(frozen=True)
-class DatasetConfig:
+class PathConfig:
     raw_dataset_path: Path
     imputed_dataset_dir: Path
     augmented_dataset_dir: Path
 
+    result_save_dir: Path
+    summary_save_path: Path
+    origin_predictions_save_path: Path
+    report_save_path: Path
+    models_save_dir: Path
+
+    ensemble_predictions_dir: Path
+    ensemble_feature_importance_dir: Path
+    metrics_dir: Path
+    calibration_dir: Path
+    K_U_group_metrics_save_path: Path
+    ensemble_c_index_save_path: Path
+    calibration_comparison_save_path: Path
+
     @classmethod
-    def from_dict(cls, cfg: dict) -> "DatasetConfig":
-        return DatasetConfig(
-            raw_dataset_path=_PROJECT_ROOT / cfg["raw_dataset_path"],
-            imputed_dataset_dir=_PROJECT_ROOT / cfg["imputed_dataset_dir"],
-            augmented_dataset_dir=_PROJECT_ROOT / cfg["augmented_dataset_dir"],
+    def from_dict(cls, cfg: dict) -> "PathConfig":
+        return PathConfig(
+            raw_dataset_path=_DATASET_DIR / cfg["raw_dataset_name"],
+            imputed_dataset_dir=_DATASET_DIR / cfg["imputed_dataset_name"],
+            augmented_dataset_dir=_DATASET_DIR / cfg["augmented_dataset_name"],
+
+            result_save_dir=_RESULTS_DIR,
+            summary_save_path=_RESULTS_DIR / cfg["summary_save_name"],
+            origin_predictions_save_path=_RESULTS_DIR / cfg["origin_predictions_save_name"],
+            report_save_path=_RESULTS_DIR / cfg["report_save_name"],
+            models_save_dir=_RESULTS_DIR / cfg["models_save_dir_name"],
+
+            ensemble_predictions_dir=_RESULTS_DIR / cfg["ensemble_predictions_dir_name"],
+            ensemble_feature_importance_dir=_RESULTS_DIR / cfg["ensemble_feature_importance_dir_name"],
+            metrics_dir=_RESULTS_DIR / cfg["metrics_dir_name"],
+            calibration_dir= _RESULTS_DIR / cfg["calibration_dir_name"],
+            K_U_group_metrics_save_path=_RESULTS_DIR / cfg["metrics_dir_name"] / cfg["K_U_group_metrics_save_name"],
+            ensemble_c_index_save_path=_RESULTS_DIR / cfg["metrics_dir_name"] / cfg["ensemble_c_index_save_name"],
+            calibration_comparison_save_path=_RESULTS_DIR / cfg["calibration_dir_name"] / cfg["calibration_comparison_save_name"],
         )
+
 
 
 @dataclass(frozen=True)
@@ -66,21 +100,8 @@ class PreprocessConfig:
             augment_times=cfg["augment_times"],
         )
 
-
-@dataclass(frozen=True)
-class ExperimentConfig:
-    num_experiments: int
-    models_to_train: Tuple[str, ...]
-    result_save_path: Path
-
-    @classmethod
-    def from_dict(cls, cfg: dict) -> "ExperimentConfig":
-        return ExperimentConfig(
-            num_experiments=cfg["num_experiments"],
-            models_to_train=tuple(cfg["models_to_train"]),
-            result_save_path=_PROJECT_ROOT / cfg.get("result_save_path"),
-        )
-
+# ====================================================
+# TODO: 待精簡
 @dataclass(frozen=True)
 class SurvivalModelConfig:
     test_size: float
@@ -95,64 +116,155 @@ class SurvivalModelConfig:
             average_age=cfg["average_age"],
         )
 
+# TODO: 待精簡
+# What-If 分析配置
 @dataclass(frozen=True)
-class analysisConfig:
-    ensemble_predictions_save_path: Path
-    K_U_metrics_save_path: Path
-    ensemble_feature_importance_save_path: Path
-    ensemble_c_index_save_path: Path
+class TreatmentAnalysisConfig:
+    """治療方式分析配置"""
+    enabled: bool
+    treatments_to_test: List[str]
+    analysis_mode: str  # "single_treatment" or "combination"
+    stratify_by_stage: bool
+    stage_column: str
+
     @classmethod
-    def from_dict(cls, cfg: dict) -> "analysisConfig":
-        return analysisConfig(
-            ensemble_predictions_save_path=_PROJECT_ROOT / cfg["ensemble_predictions_save_path"],
-            K_U_metrics_save_path=_PROJECT_ROOT / cfg["K_U_metrics_save_path"],
-            ensemble_feature_importance_save_path=_PROJECT_ROOT / cfg["ensemble_feature_importance_save_path"],
-            ensemble_c_index_save_path=_PROJECT_ROOT / cfg["ensemble_c_index_save_path"],
+    def from_dict(cls, cfg: dict) -> "TreatmentAnalysisConfig":
+        return cls(
+            enabled=cfg.get("enabled", True),
+            treatments_to_test=cfg.get("treatments_to_test", []),
+            analysis_mode=cfg.get("analysis_mode", "single_treatment"),
+            stratify_by_stage=cfg.get("stratify_by_stage", True),
+            stage_column=cfg.get("stage_column", "BCLC_stage")
         )
 
 
+@dataclass(frozen=True)
+class FeatureModificationConfig:
+    """單一特徵修改配置"""
+    enabled: bool
+    modifications: List[float]
+    min_value: Optional[float]
+    max_value: Optional[float]
+
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "FeatureModificationConfig":
+        return cls(
+            enabled=cfg.get("enabled", False),
+            modifications=cfg.get("modifications", []),
+            min_value=cfg.get("min_value"),
+            max_value=cfg.get("max_value")
+        )
+
+
+@dataclass(frozen=True)
+class ContinuousFeatureAnalysisConfig:
+    """連續特徵分析配置"""
+    enabled: bool
+    features: Dict[str, FeatureModificationConfig]
+
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "ContinuousFeatureAnalysisConfig":
+        features = {}
+        for feature_name, feature_cfg in cfg.get("features", {}).items():
+            features[feature_name] = FeatureModificationConfig.from_dict(feature_cfg)
+        
+        return cls(
+            enabled=cfg.get("enabled", True),
+            features=features
+        )
+
+
+@dataclass(frozen=True)
+class OutputSettingsConfig:
+    """輸出設定配置"""
+    save_individual_results: bool
+    save_summary_only: bool
+    create_visualizations: bool
+
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "OutputSettingsConfig":
+        return cls(
+            save_individual_results=cfg.get("save_individual_results", False),
+            save_summary_only=cfg.get("save_summary_only", True),
+            create_visualizations=cfg.get("create_visualizations", True)
+        )
+
+
+@dataclass(frozen=True)
+class WhatIfConfig:
+    """What-if 分析總配置"""
+    treatment_analysis: TreatmentAnalysisConfig
+    continuous_feature_analysis: ContinuousFeatureAnalysisConfig
+    output_settings: OutputSettingsConfig
+
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "WhatIfConfig":
+        return cls(
+            treatment_analysis=TreatmentAnalysisConfig.from_dict(
+                cfg.get("treatment_analysis", {})
+            ),
+            continuous_feature_analysis=ContinuousFeatureAnalysisConfig.from_dict(
+                cfg.get("continuous_feature_analysis", {})
+            ),
+            output_settings=OutputSettingsConfig.from_dict(
+                cfg.get("output_settings", {})
+            )
+        )
+
+@dataclass(frozen=True)
+class ExperimentConfig:
+    num_experiments: int
+    models_to_train: Tuple[str, ...]
+    calibration_methods: Tuple[str, ...]
+    survival_model_config: SurvivalModelConfig
+    whatif_config: WhatIfConfig
+
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "ExperimentConfig":
+        return ExperimentConfig(
+            num_experiments=cfg["num_experiments"],
+            models_to_train=tuple(cfg["models_to_train"]),
+            calibration_methods=tuple(cfg["calibration_methods"]),
+            survival_model_config=SurvivalModelConfig.from_dict(cfg["survival_model_config"]),
+            whatif_config=WhatIfConfig.from_dict(cfg["whatif_config"]),
+        )
+# ====================================================
+
 _CONFIG_CLASSES = {
-    "dataset_config": DatasetConfig,
+    "path_config": PathConfig,
     "feature_config": FeatureConfig,
     "preprocess_config": PreprocessConfig,
     "experiment_config": ExperimentConfig,
-    "survival_model_config": SurvivalModelConfig,
-    "analysis_config": analysisConfig,
 }
 ConfigName = Literal[
-    "dataset_config",
+    "path_config",
     "feature_config",
     "preprocess_config",
     "experiment_config",
     "survival_model_config",
     "analysis_config",
+    "whatif_config",
 ]
 
 
 @overload
-def load_config(cfg_name: Literal["dataset_config"]) -> DatasetConfig: ...
+def load_config(cfg_name: Literal["path_config"]) -> PathConfig: ...
 @overload
 def load_config(cfg_name: Literal["feature_config"]) -> FeatureConfig: ...
 @overload
 def load_config(cfg_name: Literal["preprocess_config"]) -> PreprocessConfig: ...
 @overload
 def load_config(cfg_name: Literal["experiment_config"]) -> ExperimentConfig: ...
-@overload
-def load_config(cfg_name: Literal["survival_model_config"]) -> SurvivalModelConfig: ...
-@overload
-def load_config(cfg_name: Literal["analysis_config"]) -> analysisConfig: ...
 
 
 @lru_cache(maxsize=None)
 def load_config(
     cfg_name: ConfigName,
 ) -> Union[
-    DatasetConfig,
+    PathConfig,
     FeatureConfig,
     PreprocessConfig,
     ExperimentConfig,
-    SurvivalModelConfig,
-    analysisConfig,
 ]:
     if cfg_name not in _CONFIG_CLASSES:
         raise ValueError(f"未知的配置類型: {cfg_name}")
