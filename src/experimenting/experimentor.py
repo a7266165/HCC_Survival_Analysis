@@ -2,7 +2,7 @@ import logging
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from utils.config_utils import FeatureConfig, SurvivalModelConfig, ExperimentConfig
+from utils.config_utils import PathConfig, PreprocessConfig, FeatureConfig, SurvivalModelConfig, ExperimentConfig, WhatIfConfig, TreatmentAnalysisConfig, ContinuousFeatureAnalysisConfig
 from lifelines.utils import concordance_index
 import shap
 from typing import List, Dict, Any
@@ -13,14 +13,14 @@ from dataclasses import dataclass, field
 from sklearn.neighbors import NearestNeighbors
 from lifelines import KaplanMeierFitter
 from sklearn.linear_model import LinearRegression
+import xgboost as xgb
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ExperimentResult:
-    """實驗結果封裝，包含校正結果"""
-
+    """實驗結果封裝，包含校正結果和 What-if 分析結果"""
     model_type: str
     train_predictions: pd.DataFrame
     test_predictions: pd.DataFrame
@@ -31,11 +31,15 @@ class ExperimentResult:
     feature_importance: Dict[str, Dict[str, float]]
     calibrated_test_predictions: Dict[str, pd.DataFrame] = field(default_factory=dict)
     calibrated_test_c_index: Dict[str, float] = field(default_factory=dict)
+    whatif_treatment_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
+    whatif_continuous_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
 
-
+# ========================================
+# 實驗函數
+# ========================================
 def single_experimentor(
     processed_df: pd.DataFrame,
-    is_processed: bool,
+    preprocess_config: PreprocessConfig,
     feature_config: FeatureConfig,
     random_seed: int,
     model_type: str,
@@ -55,7 +59,7 @@ def single_experimentor(
     if model_type not in model_experiment_map:
         raise ValueError(f"不支援的模型類型: {model_type}")
 
-    if (not is_processed) and processed_df.isnull().values.any():
+    if (not preprocess_config.is_preprocess) and processed_df.isnull().values.any():
         if model_type == "CoxPHFitter":
             logger.warning("資料未前處理且含缺值，跳過 CoxPHFitter 模型。")
             return
@@ -437,7 +441,7 @@ def _build_predictions_df(patient_ids, preds):
     )
     return df
 
-
+# TODO: 待精簡
 # ========================================
 # 校正函數
 # ========================================
@@ -644,17 +648,14 @@ def calibrate_predictions_curve(
 
     return result_df[["patient_id", "calibrated_prediction"]]
 
-
+# TODO: 待精簡
 # ========================================
 # 統一的校正管理器
 # ========================================
-
-
 def apply_calibration_to_experiment(
     experiment_result: ExperimentResult,
     processed_df: pd.DataFrame,
     calibration_methods: List[str],
-    random_seed: int = 42,
 ) -> None:
     """
     對單個實驗結果應用多種校正方法
@@ -722,49 +723,310 @@ def apply_calibration_to_experiment(
                 )
                 experiment_result.calibrated_test_c_index[method] = c_index
 
-            logger.info(f"成功應用 {method} 校正方法")
-
         except Exception as e:
             logger.error(f"應用 {method} 校正時發生錯誤: {str(e)}")
             continue
 
+# TODO: 待精簡
+# ========================================
+# What-If 分析函數
+# ========================================
+def apply_whatif_analysis(
+    experiment_result: ExperimentResult,
+    processed_df: pd.DataFrame,
+    whatif_config: WhatIfConfig
+) -> None:
+    """
+    對單個實驗結果應用 What-if 分析
+    直接更新 experiment_result 物件
+    """
+    # 首先在 ExperimentResult 加入新欄位
+    if not hasattr(experiment_result, 'whatif_treatment_results'):
+        experiment_result.whatif_treatment_results = {}
+    if not hasattr(experiment_result, 'whatif_continuous_results'):
+        experiment_result.whatif_continuous_results = {}
+    
+    # 獲取模型和特徵
+    model = experiment_result.model
+    model_type = experiment_result.model_type
+    
+    # 從測試集預測中獲取患者ID
+    test_patient_ids = experiment_result.test_predictions['patient_id'].unique()
+    test_df = processed_df[processed_df['patient_id'].isin(test_patient_ids)].copy()
+    
+    # 獲取特徵列
+    feature_cols = _get_feature_columns(experiment_result)
+    if not feature_cols:
+        logger.warning(f"無法獲取模型特徵列，跳過 What-if 分析")
+        return
+    
+    # 1. 治療方式分析
+    if whatif_config.treatment_analysis.enabled:
+        logger.info("執行治療方式 What-if 分析...")
+        treatment_results = _analyze_treatment_modifications(
+            model=model,
+            model_type=model_type,
+            test_df=test_df,
+            feature_cols=feature_cols,
+            treatment_config=whatif_config.treatment_analysis
+        )
+        experiment_result.whatif_treatment_results = treatment_results
+        logger.info(f"完成 {len(treatment_results)} 種治療分析")
+    
+    # 2. 連續特徵分析
+    if whatif_config.continuous_feature_analysis.enabled:
+        logger.info("執行連續特徵 What-if 分析...")
+        continuous_results = _analyze_continuous_modifications(
+            model=model,
+            model_type=model_type,
+            test_df=test_df,
+            feature_cols=feature_cols,
+            continuous_config=whatif_config.continuous_feature_analysis
+        )
+        experiment_result.whatif_continuous_results = continuous_results
+        logger.info(f"完成 {len(continuous_results)} 個特徵分析")
 
-# TODO: 儲存模組，之後要精簡該部份
+
+def _get_feature_columns(experiment_result: ExperimentResult) -> List[str]:
+    """從實驗結果中獲取特徵列名稱"""
+    # 對於 XGBoost，優先從模型獲取
+    model = experiment_result.model
+    if experiment_result.model_type == "XGBoost_AFT":
+        # XGBoost 的 Booster 物件
+        if hasattr(model, 'feature_names'):
+            return model.feature_names
+        # 嘗試從 feature_importance 獲取（但要確保順序正確）
+        if 'xgb_gain' in experiment_result.feature_importance:
+            # 從訓練時儲存的 shap_results 獲取正確順序
+            if 'feature_names' in experiment_result.shap_results:
+                return experiment_result.shap_results['feature_names']
+    
+    # 其他模型從 feature_importance 獲取
+    for method in ['catboost_prediction', 'cox_coefficients', 'shap_importance']:
+        if method in experiment_result.feature_importance:
+            return list(experiment_result.feature_importance[method].keys())
+    
+    # 如果都沒有，嘗試從模型獲取
+    if hasattr(model, 'feature_names_'):
+        return list(model.feature_names_)
+    
+    return []
+
+
+def _analyze_treatment_modifications(
+    model: Any,
+    model_type: str,
+    test_df: pd.DataFrame,
+    feature_cols: List[str],
+    treatment_config: TreatmentAnalysisConfig
+) -> Dict[str, pd.DataFrame]:
+    """分析治療方式修改的影響"""
+    results = {}
+    
+    # 確認哪些治療在特徵中
+    available_treatments = [t for t in treatment_config.treatments_to_test if t in feature_cols]
+    if not available_treatments:
+        logger.warning("沒有可用的治療特徵")
+        return results
+    
+    # 確保使用正確的特徵順序（特別是 XGBoost）
+    if model_type == "XGBoost_AFT" and hasattr(model, 'feature_names'):
+        # 使用模型訓練時的特徵順序
+        ordered_features = model.feature_names
+        if all(f in test_df.columns for f in ordered_features):
+            feature_cols = ordered_features
+    
+    # 是否按期別分層
+    if treatment_config.stratify_by_stage and treatment_config.stage_column in test_df.columns:
+        stages = test_df[treatment_config.stage_column].unique()
+    else:
+        stages = ['all']
+        test_df['temp_stage'] = 'all'
+        treatment_config.stage_column = 'temp_stage'
+    
+    # 對每個期別分析
+    for stage in stages:
+        stage_df = test_df[test_df[treatment_config.stage_column] == stage]
+        if stage_df.empty:
+            continue
+            
+        stage_results = []
+        
+        for _, patient in stage_df.iterrows():
+            patient_id = patient['patient_id']
+            X_original = patient[feature_cols].values.reshape(1, -1)
+            
+            # 原始預測
+            original_pred = _predict_with_model(model, model_type, X_original, feature_cols)
+            if original_pred is None:
+                continue
+            
+            # 記錄當前治療
+            current_treatments = [t for t in available_treatments if patient[t] == 1]
+            
+            # 測試每種治療
+            for treatment in available_treatments:
+                X_modified = X_original.copy()
+                
+                if treatment_config.analysis_mode == "single_treatment":
+                    # 單一治療模式：關閉所有治療，只開啟目標治療
+                    for idx, col in enumerate(feature_cols):
+                        if col in available_treatments:
+                            X_modified[0, idx] = 1.0 if col == treatment else 0.0
+                else:
+                    # 組合模式：切換單一治療的開關
+                    treatment_idx = feature_cols.index(treatment)
+                    X_modified[0, treatment_idx] = 1.0 - X_original[0, treatment_idx]
+                
+                # 預測修改後的結果
+                modified_pred = _predict_with_model(model, model_type, X_modified, feature_cols)
+                if modified_pred is None:
+                    continue
+                
+                stage_results.append({
+                    'patient_id': patient_id,
+                    'stage': stage,
+                    'current_treatments': current_treatments,
+                    'test_treatment': treatment,
+                    'original_prediction': original_pred,
+                    'modified_prediction': modified_pred,
+                    'change_months': modified_pred - original_pred,
+                    'change_percent': ((modified_pred - original_pred) / original_pred * 100) if original_pred > 0 else 0
+                })
+        
+        if stage_results:
+            results[f'treatment_stage_{stage}'] = pd.DataFrame(stage_results)
+    
+    # 移除臨時欄位
+    if 'temp_stage' in test_df.columns:
+        test_df.drop(columns=['temp_stage'], inplace=True)
+    
+    return results
+
+
+def _analyze_continuous_modifications(
+    model: Any,
+    model_type: str,
+    test_df: pd.DataFrame,
+    feature_cols: List[str],
+    continuous_config: ContinuousFeatureAnalysisConfig
+) -> Dict[str, pd.DataFrame]:
+    """分析連續特徵修改的影響"""
+    results = {}
+    
+    # 確保使用正確的特徵順序（特別是 XGBoost）
+    if model_type == "XGBoost_AFT" and hasattr(model, 'feature_names'):
+        ordered_features = model.feature_names
+        if all(f in test_df.columns for f in ordered_features):
+            feature_cols = ordered_features
+    
+    for feature_name, feature_config in continuous_config.features.items():
+        if not feature_config.enabled:
+            continue
+            
+        if feature_name not in feature_cols:
+            logger.warning(f"特徵 {feature_name} 不在模型中")
+            continue
+        
+        feature_idx = feature_cols.index(feature_name)
+        feature_results = []
+        
+        for _, patient in test_df.iterrows():
+            patient_id = patient['patient_id']
+            X_original = patient[feature_cols].values.reshape(1, -1)
+            original_value = X_original[0, feature_idx]
+            
+            # 原始預測
+            original_pred = _predict_with_model(model, model_type, X_original, feature_cols)
+            if original_pred is None:
+                continue
+            
+            patient_result = {
+                'patient_id': patient_id,
+                f'original_{feature_name}': original_value,
+                'original_prediction': original_pred
+            }
+            
+            # 測試每個修改值
+            for delta in feature_config.modifications:
+                new_value = original_value + delta
+                
+                # 檢查邊界
+                if feature_config.min_value is not None:
+                    new_value = max(new_value, feature_config.min_value)
+                if feature_config.max_value is not None:
+                    new_value = min(new_value, feature_config.max_value)
+                
+                X_modified = X_original.copy()
+                X_modified[0, feature_idx] = new_value
+                
+                # 預測修改後的結果
+                modified_pred = _predict_with_model(model, model_type, X_modified, feature_cols)
+                if modified_pred is None:
+                    continue
+                
+                delta_str = f"plus_{delta}" if delta > 0 else f"minus_{abs(delta)}"
+                patient_result[f'{feature_name}_{delta_str}'] = new_value
+                patient_result[f'prediction_{delta_str}'] = modified_pred
+                patient_result[f'change_{delta_str}'] = modified_pred - original_pred
+            
+            feature_results.append(patient_result)
+        
+        if feature_results:
+            results[feature_name] = pd.DataFrame(feature_results)
+    
+    return results
+
+
+def _predict_with_model(model: Any, model_type: str, X: np.ndarray, feature_names: List[str] = None) -> float:
+    """統一的預測介面，處理不同模型類型"""
+    try:
+        if model_type == "XGBoost_AFT":
+            # 不設定 feature_names，讓 XGBoost 使用訓練時的設定
+            dmatrix = xgb.DMatrix(X)
+            return model.predict(dmatrix)[0]
+        else:
+            return model.predict(X)[0]
+    except Exception as e:
+        logger.warning(f"預測失敗: {e}")
+        return None
+
+
+
+
+# TODO: 待精簡
+# ========================================
+# 儲存函數
+# ========================================
 def save_experiment_results(
-    total_experiments_result: List[ExperimentResult],  # 修正類型
-    experiment_config,
-    ts: str,
+    total_experiments_result: List[ExperimentResult],
+    path_config: PathConfig,
 ) -> Dict[str, Path]:
     """
-    精簡版實驗結果儲存函數
-
     Args:
-        total_experiments_result: 實驗結果列表（ExperimentResult物件）
-        experiment_config: 實驗配置對象
-        ts: 時間戳記
-
+        total_experiments_result: 實驗結果列表
+        path_config: 包含 result_save_path 的路徑設定
     Returns:
-        Dict[str, Path]: 儲存文件的路徑
+        Dict[str, Path]: 實際儲存檔案的路徑
     """
-    # 過濾有效結果
     valid_results = _filter_valid_results(total_experiments_result)
     if not valid_results:
         logger.warning("沒有有效的實驗結果可以儲存")
         return {}
 
-    # 創建儲存目錄
-    result_dir = _create_result_directory(experiment_config, ts)
+    # 結果根目錄（已含 timestamp）
+    result_root = path_config.result_save_dir
+    # 確保根目錄存在
+    result_root.mkdir(parents=True, exist_ok=True)
 
-    # 儲存檔案並回傳路徑
-    saved_files = {}
-    saved_files["summary"] = _save_summary_excel(valid_results, result_dir, ts)
-    saved_files["test_predictions"] = _save_predictions_csv(
-        valid_results, result_dir, ts
-    )
-    saved_files["report"] = _save_text_report(valid_results, result_dir, ts)
-    saved_files["models"] = _save_models_pickle(valid_results, result_dir, ts)
+    return {
+        "summary": _save_summary_excel(valid_results, path_config),
+        "test_predictions": _save_predictions_csv(valid_results, path_config),
+        "report": _save_text_report(valid_results, path_config),
+        "models": _save_models_pickle(valid_results, path_config),
+    }
 
-    return saved_files
+
 
 
 def _filter_valid_results(results: List[ExperimentResult]) -> List[ExperimentResult]:
@@ -796,24 +1058,10 @@ def _filter_valid_results(results: List[ExperimentResult]) -> List[ExperimentRes
     logger.info(f"總結果: {total_count}, 有效結果: {valid_count}")
     return valid_results
 
-
-def _create_result_directory(experiment_config: ExperimentConfig, ts: str) -> Path:
-    """創建結果儲存目錄"""
-    result_path = Path(experiment_config.result_save_path)
-    result_path.parent.mkdir(parents=True, exist_ok=True)
-
-    base_name = result_path.stem
-    result_dir = result_path.parent / f"{base_name}_{ts}"
-    result_dir.mkdir(exist_ok=True)
-
-    return result_dir
-
-
-def _save_summary_excel(
-    results: List[ExperimentResult], result_dir: Path, ts: str
-) -> Path:
+def _save_summary_excel(results: List[ExperimentResult],path_config: PathConfig) -> Path:
     """儲存Excel彙總報告"""
-    excel_path = result_dir / f"summary_{ts}.xlsx"
+    excel_path = path_config.summary_save_path
+    excel_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
         # 工作表1: 性能概覽
@@ -901,10 +1149,13 @@ def _extract_feature_importance_summary(
 
 
 def _save_predictions_csv(
-    results: List[ExperimentResult], result_dir: Path, ts: str
-) -> Path:
+    results: List[ExperimentResult],
+    path_config: PathConfig,) -> Path:
     """儲存預測結果CSV"""
-    csv_path = result_dir / f"predictions_{ts}.csv"
+
+    csv_path = path_config.origin_predictions_save_path
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+
 
     all_predictions = []
     for idx, result in enumerate(results):
@@ -936,10 +1187,9 @@ def _save_predictions_csv(
 
 
 def _save_text_report(
-    results: List[ExperimentResult], result_dir: Path, ts: str
-) -> Path:
+    results: List[ExperimentResult], path_config:PathConfig) -> Path:
     """儲存簡要文字報告"""
-    txt_path = result_dir / f"report_{ts}.txt"
+    txt_path = path_config.report_save_path
 
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write("實驗結果報告\n")
@@ -1003,11 +1253,10 @@ def _save_text_report(
 
 
 def _save_models_pickle(
-    results: List[ExperimentResult], result_dir: Path, ts: str
-) -> Path:
+    results: List[ExperimentResult], path_config: PathConfig) -> Path:
     """儲存模型對象"""
-    models_dir = result_dir / "models"
-    models_dir.mkdir(exist_ok=True)
+    models_dir = path_config.models_save_dir
+    models_dir.mkdir(parents=True, exist_ok=True)
 
     for idx, result in enumerate(results):
         model = result.model

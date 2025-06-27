@@ -1,0 +1,47 @@
+{
+    "treatment_analysis": {
+        "enabled": true,
+        "treatments_to_test": [
+            "liver_transplantation",
+            "surgical_resection",
+            "radiofrequency",
+            "TACE",
+            "target_therapy",
+            "immunotherapy",
+            "HAIC",
+            "radiotherapy",
+            "best_support_care"
+        ],
+        "analysis_mode": "single_treatment",
+        "stratify_by_stage": true,
+        "stage_column": "BCLC_stage"
+    },
+    "continuous_feature_analysis": {
+        "enabled": true,
+        "features": {
+            "BMI": {
+                "enabled": true,
+                "modifications": [1, -1],
+                "min_value": 10, 
+                "max_value": 50
+            },
+            "Age": {
+                "enabled": false,
+                "modifications": [5, -5],
+                "min_value": 0,
+                "max_value": 120
+            },
+            "AFP": {
+                "enabled": false,
+                "modifications": [100, -100],
+                "min_value": 0,
+                "max_value": null
+            }
+        }
+    },
+    "output_settings": {
+        "save_individual_results": false,
+        "save_summary_only": true,
+        "create_visualizations": true 
+    }
+}
