@@ -2,7 +2,16 @@ import logging
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from utils.config_utils import PathConfig, PreprocessConfig, FeatureConfig, SurvivalModelConfig, ExperimentConfig, WhatIfConfig, TreatmentAnalysisConfig, ContinuousFeatureAnalysisConfig
+from utils.config_utils import (
+    PathConfig,
+    PreprocessConfig,
+    FeatureConfig,
+    SurvivalModelConfig,
+    ExperimentConfig,
+    WhatIfConfig,
+    TreatmentAnalysisConfig,
+    ContinuousFeatureAnalysisConfig,
+)
 from lifelines.utils import concordance_index
 import shap
 from typing import List, Dict, Any
@@ -21,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExperimentResult:
     """實驗結果封裝，包含校正結果和 What-if 分析結果"""
+
     model_type: str
     train_predictions: pd.DataFrame
     test_predictions: pd.DataFrame
@@ -33,6 +43,7 @@ class ExperimentResult:
     calibrated_test_c_index: Dict[str, float] = field(default_factory=dict)
     whatif_treatment_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
     whatif_continuous_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
+
 
 # ========================================
 # 實驗函數
@@ -441,6 +452,7 @@ def _build_predictions_df(patient_ids, preds):
     )
     return df
 
+
 # TODO: 待精簡
 # ========================================
 # 校正函數
@@ -648,6 +660,7 @@ def calibrate_predictions_curve(
 
     return result_df[["patient_id", "calibrated_prediction"]]
 
+
 # TODO: 待精簡
 # ========================================
 # 統一的校正管理器
@@ -727,6 +740,7 @@ def apply_calibration_to_experiment(
             logger.error(f"應用 {method} 校正時發生錯誤: {str(e)}")
             continue
 
+
 # TODO: 待精簡
 # ========================================
 # What-If 分析函數
@@ -734,32 +748,32 @@ def apply_calibration_to_experiment(
 def apply_whatif_analysis(
     experiment_result: ExperimentResult,
     processed_df: pd.DataFrame,
-    whatif_config: WhatIfConfig
+    whatif_config: WhatIfConfig,
 ) -> None:
     """
     對單個實驗結果應用 What-if 分析
     直接更新 experiment_result 物件
     """
     # 首先在 ExperimentResult 加入新欄位
-    if not hasattr(experiment_result, 'whatif_treatment_results'):
+    if not hasattr(experiment_result, "whatif_treatment_results"):
         experiment_result.whatif_treatment_results = {}
-    if not hasattr(experiment_result, 'whatif_continuous_results'):
+    if not hasattr(experiment_result, "whatif_continuous_results"):
         experiment_result.whatif_continuous_results = {}
-    
+
     # 獲取模型和特徵
     model = experiment_result.model
     model_type = experiment_result.model_type
-    
+
     # 從測試集預測中獲取患者ID
-    test_patient_ids = experiment_result.test_predictions['patient_id'].unique()
-    test_df = processed_df[processed_df['patient_id'].isin(test_patient_ids)].copy()
-    
+    test_patient_ids = experiment_result.test_predictions["patient_id"].unique()
+    test_df = processed_df[processed_df["patient_id"].isin(test_patient_ids)].copy()
+
     # 獲取特徵列
     feature_cols = _get_feature_columns(experiment_result)
     if not feature_cols:
         logger.warning(f"無法獲取模型特徵列，跳過 What-if 分析")
         return
-    
+
     # 1. 治療方式分析
     if whatif_config.treatment_analysis.enabled:
         logger.info("執行治療方式 What-if 分析...")
@@ -768,11 +782,11 @@ def apply_whatif_analysis(
             model_type=model_type,
             test_df=test_df,
             feature_cols=feature_cols,
-            treatment_config=whatif_config.treatment_analysis
+            treatment_config=whatif_config.treatment_analysis,
         )
         experiment_result.whatif_treatment_results = treatment_results
         logger.info(f"完成 {len(treatment_results)} 種治療分析")
-    
+
     # 2. 連續特徵分析
     if whatif_config.continuous_feature_analysis.enabled:
         logger.info("執行連續特徵 What-if 分析...")
@@ -781,7 +795,7 @@ def apply_whatif_analysis(
             model_type=model_type,
             test_df=test_df,
             feature_cols=feature_cols,
-            continuous_config=whatif_config.continuous_feature_analysis
+            continuous_config=whatif_config.continuous_feature_analysis,
         )
         experiment_result.whatif_continuous_results = continuous_results
         logger.info(f"完成 {len(continuous_results)} 個特徵分析")
@@ -793,23 +807,23 @@ def _get_feature_columns(experiment_result: ExperimentResult) -> List[str]:
     model = experiment_result.model
     if experiment_result.model_type == "XGBoost_AFT":
         # XGBoost 的 Booster 物件
-        if hasattr(model, 'feature_names'):
+        if hasattr(model, "feature_names"):
             return model.feature_names
         # 嘗試從 feature_importance 獲取（但要確保順序正確）
-        if 'xgb_gain' in experiment_result.feature_importance:
+        if "xgb_gain" in experiment_result.feature_importance:
             # 從訓練時儲存的 shap_results 獲取正確順序
-            if 'feature_names' in experiment_result.shap_results:
-                return experiment_result.shap_results['feature_names']
-    
+            if "feature_names" in experiment_result.shap_results:
+                return experiment_result.shap_results["feature_names"]
+
     # 其他模型從 feature_importance 獲取
-    for method in ['catboost_prediction', 'cox_coefficients', 'shap_importance']:
+    for method in ["catboost_prediction", "cox_coefficients", "shap_importance"]:
         if method in experiment_result.feature_importance:
             return list(experiment_result.feature_importance[method].keys())
-    
+
     # 如果都沒有，嘗試從模型獲取
-    if hasattr(model, 'feature_names_'):
+    if hasattr(model, "feature_names_"):
         return list(model.feature_names_)
-    
+
     return []
 
 
@@ -818,56 +832,63 @@ def _analyze_treatment_modifications(
     model_type: str,
     test_df: pd.DataFrame,
     feature_cols: List[str],
-    treatment_config: TreatmentAnalysisConfig
+    treatment_config: TreatmentAnalysisConfig,
 ) -> Dict[str, pd.DataFrame]:
     """分析治療方式修改的影響"""
     results = {}
-    
+
     # 確認哪些治療在特徵中
-    available_treatments = [t for t in treatment_config.treatments_to_test if t in feature_cols]
+    available_treatments = [
+        t for t in treatment_config.treatments_to_test if t in feature_cols
+    ]
     if not available_treatments:
         logger.warning("沒有可用的治療特徵")
         return results
-    
+
     # 確保使用正確的特徵順序（特別是 XGBoost）
-    if model_type == "XGBoost_AFT" and hasattr(model, 'feature_names'):
+    if model_type == "XGBoost_AFT" and hasattr(model, "feature_names"):
         # 使用模型訓練時的特徵順序
         ordered_features = model.feature_names
         if all(f in test_df.columns for f in ordered_features):
             feature_cols = ordered_features
-    
+
     # 是否按期別分層
-    if treatment_config.stratify_by_stage and treatment_config.stage_column in test_df.columns:
+    if (
+        treatment_config.stratify_by_stage
+        and treatment_config.stage_column in test_df.columns
+    ):
         stages = test_df[treatment_config.stage_column].unique()
     else:
-        stages = ['all']
-        test_df['temp_stage'] = 'all'
-        treatment_config.stage_column = 'temp_stage'
-    
+        stages = ["all"]
+        test_df["temp_stage"] = "all"
+        treatment_config.stage_column = "temp_stage"
+
     # 對每個期別分析
     for stage in stages:
         stage_df = test_df[test_df[treatment_config.stage_column] == stage]
         if stage_df.empty:
             continue
-            
+
         stage_results = []
-        
+
         for _, patient in stage_df.iterrows():
-            patient_id = patient['patient_id']
+            patient_id = patient["patient_id"]
             X_original = patient[feature_cols].values.reshape(1, -1)
-            
+
             # 原始預測
-            original_pred = _predict_with_model(model, model_type, X_original, feature_cols)
+            original_pred = _predict_with_model(
+                model, model_type, X_original, feature_cols
+            )
             if original_pred is None:
                 continue
-            
+
             # 記錄當前治療
             current_treatments = [t for t in available_treatments if patient[t] == 1]
-            
+
             # 測試每種治療
             for treatment in available_treatments:
                 X_modified = X_original.copy()
-                
+
                 if treatment_config.analysis_mode == "single_treatment":
                     # 單一治療模式：關閉所有治療，只開啟目標治療
                     for idx, col in enumerate(feature_cols):
@@ -877,30 +898,38 @@ def _analyze_treatment_modifications(
                     # 組合模式：切換單一治療的開關
                     treatment_idx = feature_cols.index(treatment)
                     X_modified[0, treatment_idx] = 1.0 - X_original[0, treatment_idx]
-                
+
                 # 預測修改後的結果
-                modified_pred = _predict_with_model(model, model_type, X_modified, feature_cols)
+                modified_pred = _predict_with_model(
+                    model, model_type, X_modified, feature_cols
+                )
                 if modified_pred is None:
                     continue
-                
-                stage_results.append({
-                    'patient_id': patient_id,
-                    'stage': stage,
-                    'current_treatments': current_treatments,
-                    'test_treatment': treatment,
-                    'original_prediction': original_pred,
-                    'modified_prediction': modified_pred,
-                    'change_months': modified_pred - original_pred,
-                    'change_percent': ((modified_pred - original_pred) / original_pred * 100) if original_pred > 0 else 0
-                })
-        
+
+                stage_results.append(
+                    {
+                        "patient_id": patient_id,
+                        "stage": stage,
+                        "current_treatments": current_treatments,
+                        "test_treatment": treatment,
+                        "original_prediction": original_pred,
+                        "modified_prediction": modified_pred,
+                        "change_months": modified_pred - original_pred,
+                        "change_percent": (
+                            ((modified_pred - original_pred) / original_pred * 100)
+                            if original_pred > 0
+                            else 0
+                        ),
+                    }
+                )
+
         if stage_results:
-            results[f'treatment_stage_{stage}'] = pd.DataFrame(stage_results)
-    
+            results[f"treatment_stage_{stage}"] = pd.DataFrame(stage_results)
+
     # 移除臨時欄位
-    if 'temp_stage' in test_df.columns:
-        test_df.drop(columns=['temp_stage'], inplace=True)
-    
+    if "temp_stage" in test_df.columns:
+        test_df.drop(columns=["temp_stage"], inplace=True)
+
     return results
 
 
@@ -909,89 +938,95 @@ def _analyze_continuous_modifications(
     model_type: str,
     test_df: pd.DataFrame,
     feature_cols: List[str],
-    continuous_config: ContinuousFeatureAnalysisConfig
+    continuous_config: ContinuousFeatureAnalysisConfig,
 ) -> Dict[str, pd.DataFrame]:
     """分析連續特徵修改的影響"""
     results = {}
-    
+
     # 確保使用正確的特徵順序（特別是 XGBoost）
-    if model_type == "XGBoost_AFT" and hasattr(model, 'feature_names'):
+    if model_type == "XGBoost_AFT" and hasattr(model, "feature_names"):
         ordered_features = model.feature_names
         if all(f in test_df.columns for f in ordered_features):
             feature_cols = ordered_features
-    
+
     for feature_name, feature_config in continuous_config.features.items():
         if not feature_config.enabled:
             continue
-            
+
         if feature_name not in feature_cols:
             logger.warning(f"特徵 {feature_name} 不在模型中")
             continue
-        
+
         feature_idx = feature_cols.index(feature_name)
         feature_results = []
-        
+
         for _, patient in test_df.iterrows():
-            patient_id = patient['patient_id']
+            patient_id = patient["patient_id"]
             X_original = patient[feature_cols].values.reshape(1, -1)
             original_value = X_original[0, feature_idx]
-            
+
             # 原始預測
-            original_pred = _predict_with_model(model, model_type, X_original, feature_cols)
+            original_pred = _predict_with_model(
+                model, model_type, X_original, feature_cols
+            )
             if original_pred is None:
                 continue
-            
+
             patient_result = {
-                'patient_id': patient_id,
-                f'original_{feature_name}': original_value,
-                'original_prediction': original_pred
+                "patient_id": patient_id,
+                f"original_{feature_name}": original_value,
+                "original_prediction": original_pred,
             }
-            
+
             # 測試每個修改值
             for delta in feature_config.modifications:
                 new_value = original_value + delta
-                
+
                 # 檢查邊界
                 if feature_config.min_value is not None:
                     new_value = max(new_value, feature_config.min_value)
                 if feature_config.max_value is not None:
                     new_value = min(new_value, feature_config.max_value)
-                
+
                 X_modified = X_original.copy()
                 X_modified[0, feature_idx] = new_value
-                
+
                 # 預測修改後的結果
-                modified_pred = _predict_with_model(model, model_type, X_modified, feature_cols)
+                modified_pred = _predict_with_model(
+                    model, model_type, X_modified, feature_cols
+                )
                 if modified_pred is None:
                     continue
-                
+
                 delta_str = f"plus_{delta}" if delta > 0 else f"minus_{abs(delta)}"
-                patient_result[f'{feature_name}_{delta_str}'] = new_value
-                patient_result[f'prediction_{delta_str}'] = modified_pred
-                patient_result[f'change_{delta_str}'] = modified_pred - original_pred
-            
+                patient_result[f"{feature_name}_{delta_str}"] = new_value
+                patient_result[f"prediction_{delta_str}"] = modified_pred
+                patient_result[f"change_{delta_str}"] = modified_pred - original_pred
+
             feature_results.append(patient_result)
-        
+
         if feature_results:
             results[feature_name] = pd.DataFrame(feature_results)
-    
+
     return results
 
 
-def _predict_with_model(model: Any, model_type: str, X: np.ndarray, feature_names: List[str] = None) -> float:
+def _predict_with_model(
+    model: Any, model_type: str, X: np.ndarray, feature_names: List[str] = None
+) -> float:
     """統一的預測介面，處理不同模型類型"""
     try:
         if model_type == "XGBoost_AFT":
-            # 不設定 feature_names，讓 XGBoost 使用訓練時的設定
-            dmatrix = xgb.DMatrix(X)
+            # XGBoost 需要 feature_names 和 enable_categorical
+            dmatrix = xgb.DMatrix(
+                X, feature_names=feature_names, enable_categorical=True
+            )
             return model.predict(dmatrix)[0]
         else:
             return model.predict(X)[0]
     except Exception as e:
         logger.warning(f"預測失敗: {e}")
         return None
-
-
 
 
 # TODO: 待精簡
@@ -1027,8 +1062,6 @@ def save_experiment_results(
     }
 
 
-
-
 def _filter_valid_results(results: List[ExperimentResult]) -> List[ExperimentResult]:
     """過濾有效的實驗結果"""
     valid_results = []
@@ -1042,9 +1075,11 @@ def _filter_valid_results(results: List[ExperimentResult]) -> List[ExperimentRes
         # 檢查是否為 ExperimentResult 實例
         if isinstance(result, ExperimentResult):
             # 檢查必要欄位是否有值
-            if (result.model_type and 
-                result.train_c_index is not None and 
-                result.test_c_index is not None):
+            if (
+                result.model_type
+                and result.train_c_index is not None
+                and result.test_c_index is not None
+            ):
                 valid_results.append(result)
         else:
             logger.warning(f"結果不是 ExperimentResult 類型: {type(result)}")
@@ -1058,7 +1093,10 @@ def _filter_valid_results(results: List[ExperimentResult]) -> List[ExperimentRes
     logger.info(f"總結果: {total_count}, 有效結果: {valid_count}")
     return valid_results
 
-def _save_summary_excel(results: List[ExperimentResult],path_config: PathConfig) -> Path:
+
+def _save_summary_excel(
+    results: List[ExperimentResult], path_config: PathConfig
+) -> Path:
     """儲存Excel彙總報告"""
     excel_path = path_config.summary_save_path
     excel_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1067,26 +1105,30 @@ def _save_summary_excel(results: List[ExperimentResult],path_config: PathConfig)
         # 工作表1: 性能概覽
         performance_data = []
         for idx, r in enumerate(results):
-            performance_data.append({
-                "Model_Type": r.model_type,
-                "Experiment_Index": idx,  # 使用索引代替 random_seed
-                "Train_C_Index": r.train_c_index,
-                "Test_C_Index": r.test_c_index,
-                "Performance_Gap": r.train_c_index - r.test_c_index,
-                "Prediction_Count": len(r.test_predictions),
-            })
-            
+            performance_data.append(
+                {
+                    "Model_Type": r.model_type,
+                    "Experiment_Index": idx,  # 使用索引代替 random_seed
+                    "Train_C_Index": r.train_c_index,
+                    "Test_C_Index": r.test_c_index,
+                    "Performance_Gap": r.train_c_index - r.test_c_index,
+                    "Prediction_Count": len(r.test_predictions),
+                }
+            )
+
             # 如果有校正結果，也加入
             for method, c_index in r.calibrated_test_c_index.items():
-                performance_data.append({
-                    "Model_Type": f"{r.model_type}_{method}",
-                    "Experiment_Index": idx,
-                    "Train_C_Index": r.train_c_index,
-                    "Test_C_Index": c_index,
-                    "Performance_Gap": r.train_c_index - c_index,
-                    "Prediction_Count": len(r.calibrated_test_predictions[method]),
-                })
-        
+                performance_data.append(
+                    {
+                        "Model_Type": f"{r.model_type}_{method}",
+                        "Experiment_Index": idx,
+                        "Train_C_Index": r.train_c_index,
+                        "Test_C_Index": c_index,
+                        "Performance_Gap": r.train_c_index - c_index,
+                        "Prediction_Count": len(r.calibrated_test_predictions[method]),
+                    }
+                )
+
         performance_df = pd.DataFrame(performance_data).round(4)
         performance_df.to_excel(writer, sheet_name="Performance", index=False)
 
@@ -1110,9 +1152,9 @@ def _save_summary_excel(results: List[ExperimentResult],path_config: PathConfig)
         # 工作表3: 特徵重要性摘要（如果有的話）
         importance_df = _extract_feature_importance_summary(results)
         if not importance_df.empty:
-            importance_df.sort_values(["Model_Type", "Experiment_Index", "Method"]).to_excel(
-                writer, sheet_name="Feature_Importance", index=False
-            )
+            importance_df.sort_values(
+                ["Model_Type", "Experiment_Index", "Method"]
+            ).to_excel(writer, sheet_name="Feature_Importance", index=False)
 
     return excel_path
 
@@ -1150,12 +1192,12 @@ def _extract_feature_importance_summary(
 
 def _save_predictions_csv(
     results: List[ExperimentResult],
-    path_config: PathConfig,) -> Path:
+    path_config: PathConfig,
+) -> Path:
     """儲存預測結果CSV"""
 
     csv_path = path_config.origin_predictions_save_path
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-
 
     all_predictions = []
     for idx, result in enumerate(results):
@@ -1166,7 +1208,7 @@ def _save_predictions_csv(
         pred_df["experiment_index"] = idx
         pred_df["calibration_method"] = "original"
         all_predictions.append(pred_df)
-        
+
         # 儲存校正後的預測
         for method, calibrated_df in result.calibrated_test_predictions.items():
             cal_df = calibrated_df.copy()
@@ -1177,7 +1219,8 @@ def _save_predictions_csv(
 
     combined_df = pd.concat(all_predictions, ignore_index=True)
     cols = ["model_type", "experiment_index", "calibration_method"] + [
-        col for col in combined_df.columns 
+        col
+        for col in combined_df.columns
         if col not in ["model_type", "experiment_index", "calibration_method"]
     ]
     combined_df = combined_df[cols]
@@ -1186,8 +1229,7 @@ def _save_predictions_csv(
     return csv_path
 
 
-def _save_text_report(
-    results: List[ExperimentResult], path_config:PathConfig) -> Path:
+def _save_text_report(results: List[ExperimentResult], path_config: PathConfig) -> Path:
     """儲存簡要文字報告"""
     txt_path = path_config.report_save_path
 
@@ -1209,16 +1251,16 @@ def _save_text_report(
             f.write(f"  平均測試C-Index: {np.mean(test_scores):.4f}\n")
             f.write(f"  最佳測試C-Index: {np.max(test_scores):.4f}\n")
             f.write(f"  標準差: {np.std(test_scores):.4f}\n")
-            
+
             # 校正結果統計
             calibration_methods = set()
             for r in model_results:
                 calibration_methods.update(r.calibrated_test_c_index.keys())
-                
+
             for method in calibration_methods:
                 cal_scores = [
-                    r.calibrated_test_c_index.get(method) 
-                    for r in model_results 
+                    r.calibrated_test_c_index.get(method)
+                    for r in model_results
                     if method in r.calibrated_test_c_index
                 ]
                 cal_scores = [s for s in cal_scores if s is not None]
@@ -1230,19 +1272,19 @@ def _save_text_report(
         f.write(f"\n最佳表現:\n")
         f.write(f"  模型: {best_result.model_type}\n")
         f.write(f"  測試C-Index: {best_result.test_c_index:.4f}\n")
-        
+
         # 最佳校正結果
         best_cal_result = None
         best_cal_method = None
         best_cal_score = 0
-        
+
         for result in results:
             for method, score in result.calibrated_test_c_index.items():
                 if score > best_cal_score:
                     best_cal_score = score
                     best_cal_result = result
                     best_cal_method = method
-                    
+
         if best_cal_result:
             f.write(f"\n最佳校正表現:\n")
             f.write(f"  模型: {best_cal_result.model_type}\n")
@@ -1253,7 +1295,8 @@ def _save_text_report(
 
 
 def _save_models_pickle(
-    results: List[ExperimentResult], path_config: PathConfig) -> Path:
+    results: List[ExperimentResult], path_config: PathConfig
+) -> Path:
     """儲存模型對象"""
     models_dir = path_config.models_save_dir
     models_dir.mkdir(parents=True, exist_ok=True)

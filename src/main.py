@@ -7,7 +7,7 @@ from experimenting.experimentor import (
     single_experimentor,
     save_experiment_results,
     apply_calibration_to_experiment,
-    apply_whatif_analysis
+    apply_whatif_analysis,
 )
 from analyzing.ensemble_analyzer import (
     ensemble_predictions_by_seed,
@@ -21,6 +21,7 @@ from analyzing.ensemble_analyzer import (
 logging.getLogger("shap").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("sklearn").setLevel(logging.WARNING)
+
 
 def setup_logging():
     fmt = "%(asctime)s %(name)s [%(levelname)s] %(message)s"
@@ -60,9 +61,7 @@ def main():
 
     for model_type in experiment_config.models_to_train:
         for random_seed in range(experiment_config.num_experiments):
-            logger.info(
-                f"開始模型 {model_type} 隨機種子 {random_seed} 的實驗"
-            )
+            logger.info(f"開始模型 {model_type} 隨機種子 {random_seed} 的實驗")
             single_experiment_result = single_experimentor(
                 processed_df,
                 preprocess_config,
@@ -84,9 +83,8 @@ def main():
                 apply_whatif_analysis(
                     single_experiment_result,
                     processed_df,
-                    experiment_config.whatif_config
+                    experiment_config.whatif_config,
                 )
-            
 
                 logger.info(
                     f"模型 {model_type} seed {random_seed} 實驗完成，"
@@ -95,9 +93,7 @@ def main():
 
             total_experiments_result.append(single_experiment_result)
     logger.info("所有實驗完成，共 %d 筆資料", len(total_experiments_result))
-    saved_files = save_experiment_results(
-        total_experiments_result, path_config
-    )
+    saved_files = save_experiment_results(total_experiments_result, path_config)
 
     # ========================================
     # Step 4: 進階Ensemble分析
@@ -112,7 +108,8 @@ def main():
 
     # 4.2 特徵重要性分析（不受校正影響）
     ensemble_importance = ensemble_feature_importance(
-        total_experiments_result, path_config,
+        total_experiments_result,
+        path_config,
     )
 
     # 4.3 計算Ensemble指標（包含校正結果）
@@ -130,143 +127,11 @@ def main():
 
     # 4.5 比較不同校正方法的效果
     calibration_comparison = compare_calibration_methods(
-        survival_analysis, path_config,
+        survival_analysis,
+        path_config,
     )
     if not calibration_comparison.empty:
         logger.info("完成校正方法比較分析")
-
-    # # ========================================
-    # # Step 5: 進階臨床分析
-    # # ========================================
-    # logger.info("開始進階臨床分析...")
-    
-    # # 5.1 創建Stage x Treatment統計表（含SHAP值）
-    # logger.info("創建Stage-Treatment統計表...")
-    # stage_treatment_pivot = create_stage_treatment_shap_table(
-    #     ensemble_importance,
-    #     processed_df,
-    #     stage_col="BCLC_stage",
-    #     treatment_cols=None,  # 使用預設治療欄位
-    # )
-    
-    # if not stage_treatment_pivot.empty:
-    #     # 儲存結果
-    #     result_dir = _find_result_directory(experiment_config, ts)
-    #     save_path = result_dir / "stage_treatment_pivot_table.csv"
-        
-    #     # 創建詳細摘要
-    #     create_stage_treatment_shap_summary(stage_treatment_pivot, save_path)
-        
-    #     logger.info(f"Stage-Treatment Pivot Table已儲存至: {save_path}")
-    #     logger.info(f"分析了 {len(stage_treatment_pivot.index)} 個期別")
-    #     logger.info(f"包含 {len(stage_treatment_pivot.columns)} 種治療方式")
-    
-    # # 5.2 分析治療方式調整的影響
-    # logger.info("分析治療方式調整影響...")
-    # treatment_modification_results = analyze_treatment_modifications(
-    #     total_experiments_result,
-    #     processed_df,
-    #     stage_col="BCLC_stage",
-    #     treatment_cols=None
-    # )
-    
-    # if treatment_modification_results:
-    #     # 儲存結果
-    #     result_dir = _find_result_directory(experiment_config, ts)
-    #     treatment_mod_dir = result_dir / "treatment_modifications"
-    #     treatment_mod_dir.mkdir(exist_ok=True)
-        
-    #     # 儲存詳細結果和摘要
-    #     for key, data in treatment_modification_results.items():
-    #         if "summary" in key:
-    #             # 儲存摘要統計
-    #             save_path = treatment_mod_dir / f"{key}.csv"
-    #             data.to_csv(save_path)
-    #             logger.info(f"治療調整摘要已儲存: {key}")
-                
-    #             # 顯示最有影響的治療
-    #             if not data.empty:
-    #                 top_treatments = data.sort_values(
-    #                     ('prediction_change', 'mean'), 
-    #                     ascending=False
-    #                 ).head(3)
-    #                 stage = key.replace("stage_", "").replace("_summary", "")
-    #                 logger.info(f"Stage {stage} - Top 3 最有效治療調整:")
-    #                 for treatment, row in top_treatments.iterrows():
-    #                     mean_change = row[('prediction_change', 'mean')]
-    #                     logger.info(f"  {treatment}: 平均延長 {mean_change:.1f} 個月")
-    #         elif "detailed" in key:
-    #             # 儲存詳細資料
-    #             save_path = treatment_mod_dir / f"{key}.csv"
-    #             data.to_csv(save_path, index=False)
-    
-    # # 5.3 分析BMI調整的影響
-    # logger.info("分析BMI調整影響...")
-    # bmi_modification_results = analyze_bmi_modifications(
-    #     total_experiments_result,
-    #     processed_df,
-    #     bmi_col="BMI"
-    # )
-    
-    # if "results_df" in bmi_modification_results:
-    #     # 儲存BMI分析結果
-    #     result_dir = _find_result_directory(experiment_config, ts)
-    #     bmi_results_df = bmi_modification_results["results_df"]
-    #     bmi_results_df.to_csv(result_dir / "bmi_modification_analysis.csv", index=False)
-        
-    #     # 儲存圖片位置
-    #     if "plot_saved" in bmi_modification_results:
-    #         plot_source = Path(bmi_modification_results["plot_saved"])
-    #         plot_dest = result_dir / plot_source.name
-    #         if plot_source.exists():
-    #             import shutil
-    #             shutil.move(str(plot_source), str(plot_dest))
-    #             logger.info(f"BMI分析圖表已儲存至: {plot_dest}")
-        
-    #     # 顯示摘要
-    #     summary = bmi_modification_results.get("summary", {})
-    #     logger.info("BMI調整分析摘要:")
-    #     logger.info(f"  分析患者數: {summary.get('total_patients_analyzed', 0)}")
-    #     logger.info(f"  BMI+1平均影響: {summary.get('avg_survival_change_plus1', 0):.2f} months")
-    #     logger.info(f"  BMI-1平均影響: {summary.get('avg_survival_change_minus1', 0):.2f} months")
-    
-    # ========================================
-    # Step 6: 生成最終報告
-    # ========================================
-    # logger.info("生成最終報告...")
-    
-    # # 建立報告摘要
-    # report_summary = {
-    #     'experiment_date': ts,
-    #     'total_experiments': len(total_experiments_result),
-    #     'models_tested': list(experiment_config.models_to_train),
-    #     'calibration_methods': calibration_methods,
-    #     'clinical_analyses': {
-    #         'stage_treatment_analysis': stage_treatment_pivot.shape[0] if not stage_treatment_pivot.empty else 0,
-    #         'treatment_modifications_analyzed': len(treatment_modification_results),
-    #         'bmi_analysis_completed': 'results_df' in bmi_modification_results
-    #     }
-    # }
-    
-    # # 儲存摘要報告
-    # result_dir = _find_result_directory(experiment_config, ts)
-    # with open(result_dir / "experiment_summary.json", 'w', encoding='utf-8') as f:
-    #     import json
-    #     json.dump(report_summary, f, indent=2, ensure_ascii=False)
-    
-    # logger.info("實驗完成！所有結果已儲存至: %s", result_dir)
-    
-    # return {
-    #     'experiment_results': total_experiments_result,
-    #     'ensemble_predictions': ensemble_preds,
-    #     'ensemble_metrics': ensemble_metrics,
-    #     'survival_analysis': survival_analysis,
-    #     'calibration_comparison': calibration_comparison,
-    #     'stage_treatment_pivot': stage_treatment_pivot,
-    #     'treatment_modifications': treatment_modification_results,
-    #     'bmi_modifications': bmi_modification_results,
-    #     'summary': report_summary
-    # }
 
 
 if __name__ == "__main__":
