@@ -59,8 +59,8 @@ def main():
 
     total_experiments_result = []
 
-    for model_type in experiment_config.models_to_train:
-        for random_seed in range(experiment_config.num_experiments):
+    for model_type in experiment_config.experiment_settings.models_to_train:
+        for random_seed in range(experiment_config.experiment_settings.num_experiments):
             logger.info(f"開始模型 {model_type} 隨機種子 {random_seed} 的實驗")
             single_experiment_result = single_experimentor(
                 processed_df,
@@ -68,7 +68,7 @@ def main():
                 feature_config,
                 random_seed,
                 model_type,
-                experiment_config.survival_model_config,
+                experiment_config.model_settings,
             )
 
             logger.info(f"開始對實驗結果進行校正")
@@ -76,14 +76,14 @@ def main():
                 apply_calibration_to_experiment(
                     single_experiment_result,
                     processed_df,
-                    list(experiment_config.calibration_methods),
+                    list(experiment_config.experiment_settings.calibration_methods),
                 )
 
                 logger.info(f"開始 What-if 分析")
                 apply_whatif_analysis(
                     single_experiment_result,
                     processed_df,
-                    experiment_config.whatif_config,
+                    experiment_config.whatif_settings,
                 )
 
                 logger.info(

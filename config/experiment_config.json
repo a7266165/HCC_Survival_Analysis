@@ -1,68 +1,71 @@
 {
-  "num_experiments": 2,
-  "models_to_train": [
-    "CoxPHFitter",
-    "XGBoost_AFT",
-    "CatBoost"
-  ],
-  "calibration_methods": [
-    "knn_km",
-    "regression",
-    "segmental",
-    "curve"
-  ],
-
-  "survival_model_config": {
+  "experiment_settings": {
+    "num_experiments": 10,
+    "models_to_train": [
+      "CoxPHFitter",
+      "XGBoost_AFT",
+      "CatBoost"
+    ],
+    "calibration_methods": [
+      "knn_km",
+      "regression",
+      "segmental",
+      "curve"
+    ]
+  },
+  "model_settings": {
     "test_size": 0.2,
     "censor_limit": "inf",
     "average_age": 80.2
   },
-
-  "whatif_config": {
-    "treatment_analysis": {
-      "enabled": true,
-      "treatments_to_test": [
-        "liver_transplantation",
-        "surgical_resection",
-        "radiofrequency",
-        "TACE",
-        "target_therapy",
-        "immunotherapy",
-        "HAIC",
-        "radiotherapy",
-        "best_support_care"
-      ],
-      "analysis_mode": "single_treatment",
-      "stratify_by_stage": true,
-      "stage_column": "BCLC_stage"
-    },
-    "continuous_feature_analysis": {
-      "enabled": true,
-      "features": {
-        "BMI": {
-          "enabled": true,
-          "modifications": [1, -1],
-          "min_value": 10,
-          "max_value": 50
-        },
-        "Age": {
-          "enabled": false,
-          "modifications": [5, -5],
-          "min_value": 0,
-          "max_value": 120
-        },
-        "AFP": {
-          "enabled": false,
-          "modifications": [100, -100],
-          "min_value": 0,
-          "max_value": null
-        }
+  "whatif_settings": {
+    "analyze_treatments": true,
+    "treatments": [
+      "liver_transplantation",
+      "surgical_resection",
+      "radiofrequency",
+      "TACE",
+      "target_therapy",
+      "immunotherapy",
+      "HAIC",
+      "radiotherapy",
+      "best_support_care"
+    ],
+    "treatment_mode": "single_treatment",
+    "stratify_by_stage": true,
+    "stage_column": "BCLC_stage",
+    "analyze_continuous": true,
+    "continuous_features": {
+      "BMI": {
+        "enabled": true,
+        "modifications": [
+          1,
+          -1
+        ],
+        "min_value": 10,
+        "max_value": 50
+      },
+      "Age": {
+        "enabled": false,
+        "modifications": [
+          5,
+          -5
+        ],
+        "min_value": 0,
+        "max_value": 120
+      },
+      "AFP": {
+        "enabled": false,
+        "modifications": [
+          100,
+          -100
+        ],
+        "min_value": 0,
+        "max_value": null
       }
     },
-    "output_settings": {
-      "save_individual_results": false,
-      "save_summary_only": true,
-      "create_visualizations": true
-    }
+    "save_individual": false,
+    "save_summary": true,
+    "create_plots": true
   }
 }

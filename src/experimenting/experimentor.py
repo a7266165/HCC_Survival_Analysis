@@ -6,11 +6,9 @@ from utils.config_utils import (
     PathConfig,
     PreprocessConfig,
     FeatureConfig,
-    SurvivalModelConfig,
+    ModelSettings,  # 改成新的
     ExperimentConfig,
-    WhatIfConfig,
-    TreatmentAnalysisConfig,
-    ContinuousFeatureAnalysisConfig,
+    WhatIfSettings,  # 改成新的
 )
 from lifelines.utils import concordance_index
 import shap
@@ -54,7 +52,7 @@ def single_experimentor(
     feature_config: FeatureConfig,
     random_seed: int,
     model_type: str,
-    survival_model_config: SurvivalModelConfig,
+    model_settings: ModelSettings,
 ):
     """
     根據模型類型進行相應的數據準備和訓練
@@ -78,7 +76,7 @@ def single_experimentor(
     # 執行對應的實驗
     experiment_function = model_experiment_map[model_type]
     experiment_result = experiment_function(
-        processed_df, feature_config, random_seed, survival_model_config
+        processed_df, feature_config, random_seed, model_settings
     )
 
     # 記錄實驗結果
@@ -94,7 +92,7 @@ def _cox_full_experiment(
     processed_df: pd.DataFrame,
     feature_config: FeatureConfig,
     random_seed: int,
-    survival_model_config: SurvivalModelConfig,
+    model_settings: ModelSettings,
 ):
     from lifelines import CoxPHFitter
 
@@ -105,7 +103,7 @@ def _cox_full_experiment(
     logger.info("開始訓練模型...")
     train_data, test_data = train_test_split(
         cph_df,
-        test_size=survival_model_config.test_size,
+        test_size=model_settings.test_size,
         random_state=random_seed,
         stratify=cph_df["event"],
     )
@@ -186,7 +184,7 @@ def _xgboost_full_experiment(
     processed_df: pd.DataFrame,
     feature_config: FeatureConfig,
     random_seed: int,
-    survival_model_config: SurvivalModelConfig,
+    model_settings: ModelSettings,
 ):
     import xgboost as xgb
 
@@ -201,10 +199,10 @@ def _xgboost_full_experiment(
     y_lower = y["time"].values.copy()
     y_upper = y["time"].values.copy()
 
-    if survival_model_config.censor_limit == "inf":
+    if model_settings.censor_limit == "inf":
         y_upper[processed_df["event"] == 0] = np.inf
-    elif survival_model_config.censor_limit == "avg_life-age":
-        age_diff = survival_model_config.average_age - X["Age"]
+    elif model_settings.censor_limit == "avg_life-age":
+        age_diff = model_settings.average_age - X["Age"]
         age_diff[age_diff < 0] = 0
         censored_mask = processed_df["event"] == 0
         y_upper[censored_mask] = (
@@ -233,7 +231,7 @@ def _xgboost_full_experiment(
         y_lower,
         y_upper,
         patient_id_mapping,  # ← 一起分割患者ID
-        test_size=survival_model_config.test_size,
+        test_size=model_settings.test_size,
         random_state=random_seed,
         stratify=processed_df["event"],
     )
@@ -323,7 +321,7 @@ def _catboost_full_experiment(
     processed_df: pd.DataFrame,
     feature_config: FeatureConfig,
     random_seed: int,
-    survival_model_config: SurvivalModelConfig,
+    model_settings: ModelSettings,
 ):
     from catboost import CatBoostRegressor, Pool
 
@@ -338,10 +336,10 @@ def _catboost_full_experiment(
     y_lower = y["time"].values.copy()
     y_upper = y["time"].values.copy()
 
-    if survival_model_config.censor_limit == "inf":
+    if model_settings.censor_limit == "inf":
         y_upper[processed_df["event"] == 0] = np.inf
-    elif survival_model_config.censor_limit == "avg_life-age":
-        age_diff = survival_model_config.average_age - X["Age"]
+    elif model_settings.censor_limit == "avg_life-age":
+        age_diff = model_settings.average_age - X["Age"]
         age_diff[age_diff < 0] = 0
         censored_mask = processed_df["event"] == 0
         y_upper[censored_mask] = (
@@ -367,7 +365,7 @@ def _catboost_full_experiment(
         y_lower,
         processed_df["event"],
         patient_id_mapping,
-        test_size=survival_model_config.test_size,
+        test_size=model_settings.test_size,
         random_state=random_seed,
         stratify=processed_df["event"],
     )
@@ -748,7 +746,7 @@ def apply_calibration_to_experiment(
 def apply_whatif_analysis(
     experiment_result: ExperimentResult,
     processed_df: pd.DataFrame,
-    whatif_config: WhatIfConfig,
+    whatif_settings: WhatIfSettings,
 ) -> None:
     """
     對單個實驗結果應用 What-if 分析
@@ -775,27 +773,27 @@ def apply_whatif_analysis(
         return
 
     # 1. 治療方式分析
-    if whatif_config.treatment_analysis.enabled:
+    if whatif_settings.analyze_treatments:
         logger.info("執行治療方式 What-if 分析...")
         treatment_results = _analyze_treatment_modifications(
-            model=model,
-            model_type=model_type,
-            test_df=test_df,
-            feature_cols=feature_cols,
-            treatment_config=whatif_config.treatment_analysis,
+            model,
+            model_type,
+            test_df,
+            feature_cols,
+            whatif_settings,
         )
         experiment_result.whatif_treatment_results = treatment_results
         logger.info(f"完成 {len(treatment_results)} 種治療分析")
 
     # 2. 連續特徵分析
-    if whatif_config.continuous_feature_analysis.enabled:
+    if whatif_settings.analyze_continuous:
         logger.info("執行連續特徵 What-if 分析...")
         continuous_results = _analyze_continuous_modifications(
-            model=model,
-            model_type=model_type,
-            test_df=test_df,
-            feature_cols=feature_cols,
-            continuous_config=whatif_config.continuous_feature_analysis,
+            model,
+            model_type,
+            test_df,
+            feature_cols,
+            whatif_settings,
         )
         experiment_result.whatif_continuous_results = continuous_results
         logger.info(f"完成 {len(continuous_results)} 個特徵分析")
@@ -832,15 +830,13 @@ def _analyze_treatment_modifications(
     model_type: str,
     test_df: pd.DataFrame,
     feature_cols: List[str],
-    treatment_config: TreatmentAnalysisConfig,
+    whatif_settings: WhatIfSettings,
 ) -> Dict[str, pd.DataFrame]:
     """分析治療方式修改的影響"""
     results = {}
 
     # 確認哪些治療在特徵中
-    available_treatments = [
-        t for t in treatment_config.treatments_to_test if t in feature_cols
-    ]
+    available_treatments = [t for t in whatif_settings.treatments if t in feature_cols]
     if not available_treatments:
         logger.warning("沒有可用的治療特徵")
         return results
@@ -854,18 +850,18 @@ def _analyze_treatment_modifications(
 
     # 是否按期別分層
     if (
-        treatment_config.stratify_by_stage
-        and treatment_config.stage_column in test_df.columns
+        whatif_settings.stratify_by_stage
+        and whatif_settings.stage_column in test_df.columns
     ):
-        stages = test_df[treatment_config.stage_column].unique()
+        stages = test_df[whatif_settings.stage_column].unique()
     else:
         stages = ["all"]
         test_df["temp_stage"] = "all"
-        treatment_config.stage_column = "temp_stage"
+        whatif_settings.stage_column = "temp_stage"
 
     # 對每個期別分析
     for stage in stages:
-        stage_df = test_df[test_df[treatment_config.stage_column] == stage]
+        stage_df = test_df[test_df[whatif_settings.stage_column] == stage]
         if stage_df.empty:
             continue
 
@@ -889,7 +885,7 @@ def _analyze_treatment_modifications(
             for treatment in available_treatments:
                 X_modified = X_original.copy()
 
-                if treatment_config.analysis_mode == "single_treatment":
+                if whatif_settings.treatment_mode == "single_treatment":
                     # 單一治療模式：關閉所有治療，只開啟目標治療
                     for idx, col in enumerate(feature_cols):
                         if col in available_treatments:
@@ -938,7 +934,7 @@ def _analyze_continuous_modifications(
     model_type: str,
     test_df: pd.DataFrame,
     feature_cols: List[str],
-    continuous_config: ContinuousFeatureAnalysisConfig,
+    whatif_settings: WhatIfSettings,
 ) -> Dict[str, pd.DataFrame]:
     """分析連續特徵修改的影響"""
     results = {}
@@ -949,8 +945,8 @@ def _analyze_continuous_modifications(
         if all(f in test_df.columns for f in ordered_features):
             feature_cols = ordered_features
 
-    for feature_name, feature_config in continuous_config.features.items():
-        if not feature_config.enabled:
+    for feature_name, feature_config in whatif_settings.continuous_features.items():
+        if not feature_config.get("enabled", False):
             continue
 
         if feature_name not in feature_cols:
@@ -979,14 +975,14 @@ def _analyze_continuous_modifications(
             }
 
             # 測試每個修改值
-            for delta in feature_config.modifications:
+            for delta in feature_config.get("modifications", []):
                 new_value = original_value + delta
 
                 # 檢查邊界
-                if feature_config.min_value is not None:
-                    new_value = max(new_value, feature_config.min_value)
-                if feature_config.max_value is not None:
-                    new_value = min(new_value, feature_config.max_value)
+                if feature_config.get("min_value") is not None:
+                    new_value = max(new_value, feature_config.get("min_value"))
+                if feature_config.get("max_value") is not None:
+                    new_value = min(new_value, feature_config.get("max_value"))
 
                 X_modified = X_original.copy()
                 X_modified[0, feature_idx] = new_value
