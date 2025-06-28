@@ -1,8 +1,0 @@
-{
-    
-    "ensemble_predictions_save_path": "results/ensemble_predictions.csv",
-    "ensemble_feature_importance_save_path": "results/feature_importance.csv",
-    "ensemble_c_index_save_path": "results/ensemble_c_index.csv",
-    "K_U_metrics_save_path": "results/K_U_metrics.csv"
-
-}
