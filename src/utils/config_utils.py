@@ -34,6 +34,7 @@ class PathConfig:
     ensemble_feature_importance_dir: Path
     metrics_dir: Path
     calibration_dir: Path
+    figures_dir: Path
     K_U_group_metrics_save_path: Path
     ensemble_c_index_save_path: Path
     calibration_comparison_save_path: Path
@@ -56,6 +57,7 @@ class PathConfig:
             / cfg["ensemble_feature_importance_dir_name"],
             metrics_dir=_RESULTS_DIR / cfg["metrics_dir_name"],
             calibration_dir=_RESULTS_DIR / cfg["calibration_dir_name"],
+            figures_dir=_RESULTS_DIR / cfg["figures_dir_name"],
             K_U_group_metrics_save_path=_RESULTS_DIR
             / cfg["metrics_dir_name"]
             / cfg["K_U_group_metrics_save_name"],

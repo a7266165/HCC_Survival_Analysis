@@ -133,6 +133,29 @@ def main():
     if not calibration_comparison.empty:
         logger.info("完成校正方法比較分析")
 
+    # ========================================
+    # Step 5: 視覺化分析結果
+    # ========================================
+    logger.info("開始生成視覺化圖表...")
+    from analyzing.visualizer import SurvivalVisualizer
+
+    # 建立視覺化工具（暫時手動設定路徑）
+    visualizer = SurvivalVisualizer(path_config)
+
+    # 生成特徵重要性熱圖
+    visualizer.plot_feature_importance_heatmap(top_n=20)
+
+    # 生成特徵重要性柱狀圖
+    visualizer.plot_feature_importance_bars(top_n=15)
+
+    # 生成 K/U 群組分析圖
+    visualizer.plot_ku_group_metrics()
+
+    # 生成校正前後散點圖
+    visualizer.plot_calibration_scatter(processed_df)
+
+    logger.info("視覺化完成！")
+
 
 if __name__ == "__main__":
     main()

@@ -146,10 +146,10 @@ def ensemble_feature_importance(
             ]
         ].sort_values(["method", "mean_importance"], ascending=[True, False])
 
-        # 儲存各模型的 feature importance
-        d = path_config.ensemble_feature_importance_dir
-        d.mkdir(parents=True, exist_ok=True)
-        df.to_csv(d / f"{model_type}.csv", index=False)
+    d = path_config.ensemble_feature_importance_dir
+    d.mkdir(parents=True, exist_ok=True)
+    all_results = pd.concat(ensemble_results.values(), ignore_index=True)
+    all_results.to_csv(d / "all_models_feature_importance.csv", index=False)
 
     return ensemble_results
 
