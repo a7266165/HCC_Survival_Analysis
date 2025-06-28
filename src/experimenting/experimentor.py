@@ -12,7 +12,7 @@ from utils.config_utils import (
 )
 from lifelines.utils import concordance_index
 import shap
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from datetime import datetime
 from pathlib import Path
 import pickle
@@ -46,6 +46,73 @@ class ExperimentResult:
 # ========================================
 # 實驗函數
 # ========================================
+def run_single_experiment(
+    args: Tuple[pd.DataFrame, any, any, int, str, any, any, List[str]],
+) -> ExperimentResult:
+    """
+    執行單一實驗的包裝函數，用於並行處理
+
+    Args:
+        args: 包含所有必要參數的元組
+
+    Returns:
+        實驗結果
+    """
+    (
+        processed_df,
+        preprocess_config,
+        feature_config,
+        random_seed,
+        model_type,
+        model_settings,
+        whatif_settings,
+        calibration_methods,
+    ) = args
+
+    # 在子進程中重新設定 logging（避免多進程的 logging 衝突）
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"開始模型 {model_type} 隨機種子 {random_seed} 的實驗")
+
+    # 執行實驗
+    single_experiment_result = single_experimentor(
+        processed_df,
+        preprocess_config,
+        feature_config,
+        random_seed,
+        model_type,
+        model_settings,
+    )
+
+    # 校正
+    if single_experiment_result is not None:
+        logger.info(f"開始對實驗結果進行校正")
+        apply_calibration_to_experiment(
+            single_experiment_result,
+            processed_df,
+            calibration_methods,
+        )
+
+        logger.info(f"開始 What-if 分析")
+        apply_whatif_analysis(
+            single_experiment_result,
+            processed_df,
+            whatif_settings,
+        )
+
+        logger.info(
+            f"模型 {model_type} seed {random_seed} 實驗完成，"
+            f"包含 {len(single_experiment_result.calibrated_test_predictions)} 種校正方法"
+        )
+
+    return single_experiment_result
+
+
 def single_experimentor(
     processed_df: pd.DataFrame,
     preprocess_config: PreprocessConfig,
@@ -246,7 +313,7 @@ def _xgboost_full_experiment(
         "aft_loss_distribution": "normal",
         "aft_loss_distribution_scale": 1.0,
         "tree_method": "hist",
-        "nthread": 2,
+        "nthread": 1,
     }
 
     model = xgb.train(params, dtrain, num_boost_round=20)
@@ -373,7 +440,7 @@ def _catboost_full_experiment(
     model = CatBoostRegressor(
         iterations=100,
         loss_function="SurvivalAft",
-        thread_count=4,
+        thread_count=1,
         verbose=False,
         allow_writing_files=False,
     )
