@@ -1,0 +1,16 @@
+{
+    "enabled": true,
+    "max_workers": 4,
+    "use_cpu_count": true,
+    "reserve_cpus": 1,
+    "show_progress": true,
+    "log_level": "INFO",
+    "_comment": {
+        "enabled": "是否啟用多進程處理",
+        "max_workers": "最大 worker 數量",
+        "use_cpu_count": "是否基於 CPU 數量自動計算",
+        "reserve_cpus": "保留給系統的 CPU 數量",
+        "show_progress": "是否顯示進度",
+        "log_level": "子進程的日誌級別"
+    }
+}
