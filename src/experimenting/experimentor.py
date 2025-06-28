@@ -1190,34 +1190,46 @@ def _save_predictions_csv(
     results: List[ExperimentResult],
     path_config: PathConfig,
 ) -> Path:
-    """儲存預測結果CSV"""
+    """儲存預測結果CSV（包含訓練集和測試集）"""
 
     csv_path = path_config.origin_predictions_save_path
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     all_predictions = []
     for idx, result in enumerate(results):
-        # 儲存原始預測
-        test_predictions = result.test_predictions
-        pred_df = test_predictions.copy()
-        pred_df["model_type"] = result.model_type
-        pred_df["experiment_index"] = idx
-        pred_df["calibration_method"] = "original"
-        all_predictions.append(pred_df)
+        # 儲存訓練集原始預測
+        train_predictions = result.train_predictions
+        train_df = train_predictions.copy()
+        train_df["model_type"] = result.model_type
+        train_df["experiment_index"] = idx
+        train_df["calibration_method"] = "original"
+        train_df["dataset"] = "train"
+        all_predictions.append(train_df)
 
-        # 儲存校正後的預測
+        # 儲存測試集原始預測
+        test_predictions = result.test_predictions
+        test_df = test_predictions.copy()
+        test_df["model_type"] = result.model_type
+        test_df["experiment_index"] = idx
+        test_df["calibration_method"] = "original"
+        test_df["dataset"] = "test"
+        all_predictions.append(test_df)
+
+        # 儲存校正後的預測（只有測試集有校正）
         for method, calibrated_df in result.calibrated_test_predictions.items():
             cal_df = calibrated_df.copy()
             cal_df["model_type"] = result.model_type
             cal_df["experiment_index"] = idx
             cal_df["calibration_method"] = method
+            cal_df["dataset"] = "test"
             all_predictions.append(cal_df)
 
     combined_df = pd.concat(all_predictions, ignore_index=True)
-    cols = ["model_type", "experiment_index", "calibration_method"] + [
+    cols = ["model_type", "experiment_index", "calibration_method", "dataset"] + [
         col
         for col in combined_df.columns
-        if col not in ["model_type", "experiment_index", "calibration_method"]
+        if col
+        not in ["model_type", "experiment_index", "calibration_method", "dataset"]
     ]
     combined_df = combined_df[cols]
     combined_df.to_csv(csv_path, index=False)

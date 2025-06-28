@@ -505,13 +505,13 @@ class SurvivalVisualizer:
         self, processed_df: pd.DataFrame, figsize: Optional[tuple] = None
     ) -> None:
         """
-        繪製校正前後的散點圖，展示預測誤差分布
+        繪製校正前後的散點圖，展示預測誤差分布（包含訓練集和測試集）
 
         Args:
             processed_df: 包含真實生存時間的原始資料
             figsize: 圖片大小
         """
-        logger.info("繪製校正前後的預測誤差散點圖...")
+        logger.info("繪製校正前後的預測誤差散點圖（訓練集+測試集）...")
 
         # 讀取原始預測結果
         predictions_dir = self.path_config.result_save_dir / "original_predictions"
@@ -523,6 +523,9 @@ class SurvivalVisualizer:
 
         # 讀取所有預測結果
         all_predictions = pd.read_csv(predictions_file)
+
+        # 檢查是否有 dataset 欄位（新格式）
+        has_dataset_column = "dataset" in all_predictions.columns
 
         # 合併真實的生存時間資料
         true_data = processed_df[["patient_id", "time", "event"]]
@@ -536,35 +539,108 @@ class SurvivalVisualizer:
         # 校正方法
         calibration_methods = ["knn_km", "regression", "segmental", "curve"]
 
-        # 設定圖片大小
+        # 設定圖片大小 - 現在需要顯示訓練集和測試集
         if figsize is None:
-            figsize = (16, 4 * len(models))
+            figsize = (16, 8 * len(models))  # 每個模型需要兩行
 
-        fig, axes = plt.subplots(len(models), 4, figsize=figsize)
+        fig, axes = plt.subplots(len(models) * 2, 4, figsize=figsize)
         if len(models) == 1:
-            axes = axes.reshape(1, -1)
+            axes = axes.reshape(2, -1)
 
         # 為每個模型和校正方法繪製散點圖
         for i, model in enumerate(models):
-            # 取得該模型的原始預測
-            original = all_predictions[
-                (all_predictions["model_type"] == model)
-                & (all_predictions["calibration_method"] == "original")
-            ]
+            # 取得訓練集和測試集的原始預測
+            if has_dataset_column:
+                train_original = all_predictions[
+                    (all_predictions["model_type"] == model)
+                    & (all_predictions["calibration_method"] == "original")
+                    & (all_predictions["dataset"] == "train")
+                ]
 
-            if original.empty:
+                test_original = all_predictions[
+                    (all_predictions["model_type"] == model)
+                    & (all_predictions["calibration_method"] == "original")
+                    & (all_predictions["dataset"] == "test")
+                ]
+            else:
+                # 舊格式：只有測試集資料
+                train_original = pd.DataFrame()  # 空的 DataFrame
+                test_original = all_predictions[
+                    (all_predictions["model_type"] == model)
+                    & (all_predictions["calibration_method"] == "original")
+                ]
+
+            if test_original.empty:
                 continue
 
-            # 計算原始預測誤差
-            original_error = original["predicted_survival_time"] - original["time"]
+            # 計算預測誤差
+            if not train_original.empty:
+                train_original_error = (
+                    train_original["predicted_survival_time"] - train_original["time"]
+                )
+            test_original_error = (
+                test_original["predicted_survival_time"] - test_original["time"]
+            )
 
             for j, method in enumerate(calibration_methods):
-                ax = axes[i, j]
+                # 訓練集圖
+                ax_train = axes[i * 2, j]
+
+                if not train_original.empty:
+                    # 繪製訓練集原始預測（藍點）
+                    ax_train.scatter(
+                        train_original["time"],
+                        train_original_error,
+                        alpha=0.5,
+                        s=20,
+                        c="blue",
+                        label="Original (Train)",
+                        edgecolors="none",
+                    )
+
+                    # 加上統計資訊
+                    mae = np.abs(train_original_error).mean()
+                    bias = train_original_error.mean()
+                    ax_train.text(
+                        0.02,
+                        0.98,
+                        f"MAE: {mae:.2f}\nBias: {bias:.2f}",
+                        transform=ax_train.transAxes,
+                        verticalalignment="top",
+                        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+                        fontsize=9,
+                    )
+                else:
+                    ax_train.text(
+                        0.5,
+                        0.5,
+                        "Training Set Data\nNot Available\n\n(Re-run to generate)",
+                        ha="center",
+                        va="center",
+                        transform=ax_train.transAxes,
+                        fontsize=12,
+                        color="gray",
+                    )
+
+                # 加上零線
+                ax_train.axhline(
+                    y=0, color="black", linestyle="--", alpha=0.5, linewidth=1
+                )
+                ax_train.set_xlabel("Actual Survival Time (months)")
+                ax_train.set_ylabel("Prediction Error (months)")
+                ax_train.set_title(f"{model} - {method} (Train)")
+                ax_train.grid(True, alpha=0.3)
+                ax_train.set_ylim(-50, 50)
+                if not train_original.empty:
+                    ax_train.legend(frameon=True, loc="upper right")
+
+                # 測試集圖
+                ax_test = axes[i * 2 + 1, j]
 
                 # 繪製原始預測（藍點）
-                ax.scatter(
-                    original["time"],
-                    original_error,
+                ax_test.scatter(
+                    test_original["time"],
+                    test_original_error,
                     alpha=0.5,
                     s=20,
                     c="blue",
@@ -572,22 +648,30 @@ class SurvivalVisualizer:
                     edgecolors="none",
                 )
 
-                # 取得校正後的預測
-                calibrated = all_predictions[
-                    (all_predictions["model_type"] == model)
-                    & (all_predictions["calibration_method"] == method)
-                ]
+                # 取得校正後的預測（測試集）
+                if has_dataset_column:
+                    test_calibrated = all_predictions[
+                        (all_predictions["model_type"] == model)
+                        & (all_predictions["calibration_method"] == method)
+                        & (all_predictions["dataset"] == "test")
+                    ]
+                else:
+                    test_calibrated = all_predictions[
+                        (all_predictions["model_type"] == model)
+                        & (all_predictions["calibration_method"] == method)
+                    ]
 
-                if not calibrated.empty:
+                if not test_calibrated.empty:
                     # 計算校正後的預測誤差
-                    calibrated_error = (
-                        calibrated["predicted_survival_time"] - calibrated["time"]
+                    test_calibrated_error = (
+                        test_calibrated["predicted_survival_time"]
+                        - test_calibrated["time"]
                     )
 
                     # 繪製校正後的預測（紅點）
-                    ax.scatter(
-                        calibrated["time"],
-                        calibrated_error,
+                    ax_test.scatter(
+                        test_calibrated["time"],
+                        test_calibrated_error,
                         alpha=0.5,
                         s=20,
                         c="red",
@@ -595,27 +679,48 @@ class SurvivalVisualizer:
                         edgecolors="none",
                     )
 
+                    # 加上統計資訊比較
+                    orig_mae = np.abs(test_original_error).mean()
+                    cal_mae = np.abs(test_calibrated_error).mean()
+                    improvement = (
+                        ((orig_mae - cal_mae) / orig_mae * 100) if orig_mae > 0 else 0
+                    )
+
+                    ax_test.text(
+                        0.02,
+                        0.98,
+                        f"Original MAE: {orig_mae:.2f}\n{method} MAE: {cal_mae:.2f}\nImprove: {improvement:.1f}%",
+                        transform=ax_test.transAxes,
+                        verticalalignment="top",
+                        bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5),
+                        fontsize=9,
+                    )
+
                 # 加上零線
-                ax.axhline(y=0, color="black", linestyle="--", alpha=0.5, linewidth=1)
+                ax_test.axhline(
+                    y=0, color="black", linestyle="--", alpha=0.5, linewidth=1
+                )
 
                 # 設定標籤和標題
-                ax.set_xlabel("Actual Survival Time (months)")
-                ax.set_ylabel("Prediction Error (months)")
-                ax.set_title(f"{model} - {method}")
-                ax.grid(True, alpha=0.3)
-                ax.legend(frameon=True, loc="upper right")
+                ax_test.set_xlabel("Actual Survival Time (months)")
+                ax_test.set_ylabel("Prediction Error (months)")
+                ax_test.set_title(f"{model} - {method} (Test)")
+                ax_test.grid(True, alpha=0.3)
+                ax_test.legend(frameon=True, loc="upper right")
 
                 # 設定 y 軸範圍
-                ax.set_ylim(-50, 50)
+                ax_test.set_ylim(-50, 50)
 
         plt.suptitle(
-            "Calibration Effect: Prediction Error Distribution", fontsize=16, y=0.995
+            "Calibration Effect: Prediction Error Distribution (Train & Test Sets)",
+            fontsize=16,
+            y=0.995,
         )
         plt.tight_layout()
 
         # 儲存
-        save_path = self.figures_dir / "calibration_scatter_plots.png"
+        save_path = self.figures_dir / "calibration_scatter_plots_train_test.png"
         plt.savefig(save_path)
         plt.close()
 
-        logger.info(f"校正散點圖已儲存至: {save_path}")
+        logger.info(f"校正散點圖（訓練集+測試集）已儲存至: {save_path}")
