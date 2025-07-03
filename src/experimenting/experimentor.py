@@ -69,7 +69,7 @@ def run_single_experiment(
         calibration_methods,
     ) = args
 
-    # 在子進程中重新設定 logging（避免多進程的 logging 衝突）
+    # 重設 logging ，避免多進程的 logging 衝突
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
