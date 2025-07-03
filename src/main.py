@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 from utils.config_utils import load_config
-from utils.multiprocess_utils import MultiprocessConfig, run_parallel_tasks
+from utils.multiprocess_utils import run_parallel_tasks
 from preprocessing.preprocessor import data_preprocessor
 from experimenting.experimentor import (
     run_single_experiment,
