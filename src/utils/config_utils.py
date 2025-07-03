@@ -109,6 +109,7 @@ class PreprocessConfig:
             augment_times=cfg["augment_times"],
         )
 
+
 @dataclass(frozen=True)
 class ExperimentSettings:
     num_experiments: int
@@ -190,6 +191,26 @@ class ExperimentConfig:
         )
 
 
+@dataclass(frozen=True)
+class MultiprocessConfig:
+    enabled: bool
+    max_workers: int
+    use_cpu_count: bool
+    reserve_cpus: int
+    show_progress: bool
+    log_level: str
+
+    @classmethod
+    def from_dict(cls, cfg: dict) -> "MultiprocessConfig":
+        return MultiprocessConfig(
+            enabled=cfg.get("enabled", True),
+            max_workers=cfg.get("max_workers", 4),
+            use_cpu_count=cfg.get("use_cpu_count", True),
+            reserve_cpus=cfg.get("reserve_cpus", 1),
+            show_progress=cfg.get("show_progress", True),
+            log_level=cfg.get("log_level", "INFO"),
+        )
+
 # ====================================================
 
 _CONFIG_CLASSES = {
@@ -197,15 +218,16 @@ _CONFIG_CLASSES = {
     "feature_config": FeatureConfig,
     "preprocess_config": PreprocessConfig,
     "experiment_config": ExperimentConfig,
+    "multiprocess_config": MultiprocessConfig,
+
 }
 ConfigName = Literal[
     "path_config",
     "feature_config",
     "preprocess_config",
     "experiment_config",
-    "survival_model_config",
-    "analysis_config",
-    "whatif_config",
+    "multiprocess_config",
+
 ]
 
 
@@ -217,7 +239,8 @@ def load_config(cfg_name: Literal["feature_config"]) -> FeatureConfig: ...
 def load_config(cfg_name: Literal["preprocess_config"]) -> PreprocessConfig: ...
 @overload
 def load_config(cfg_name: Literal["experiment_config"]) -> ExperimentConfig: ...
-
+@overload
+def load_config(cfg_name: Literal["multiprocess_config"]) -> MultiprocessConfig: ...
 
 @lru_cache(maxsize=None)
 def load_config(
@@ -227,6 +250,7 @@ def load_config(
     FeatureConfig,
     PreprocessConfig,
     ExperimentConfig,
+    MultiprocessConfig,
 ]:
     if cfg_name not in _CONFIG_CLASSES:
         raise ValueError(f"未知的配置類型: {cfg_name}")

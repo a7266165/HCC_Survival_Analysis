@@ -2,34 +2,10 @@
 import logging
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import List, Dict, Any, Callable
-from pathlib import Path
-import json
+from utils.config_utils import MultiprocessConfig
+from typing import List, Any, Callable
 
 logger = logging.getLogger(__name__)
-
-
-class MultiprocessConfig:
-    """多進程配置類"""
-
-    def __init__(self, config_path: Path = None):
-        if config_path is None:
-            # 預設路徑
-            config_path = (
-                Path(__file__).parent.parent.parent
-                / "config"
-                / "multiprocess_config.json"
-            )
-
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = json.load(f)
-
-        self.enabled = config.get("enabled", True)
-        self.max_workers = config.get("max_workers", 4)
-        self.use_cpu_count = config.get("use_cpu_count", True)
-        self.reserve_cpus = config.get("reserve_cpus", 1)
-        self.show_progress = config.get("show_progress", True)
-        self.log_level = config.get("log_level", "INFO")
 
 
 def calculate_optimal_workers(total_tasks: int, config: MultiprocessConfig) -> int:
@@ -65,6 +41,7 @@ def calculate_optimal_workers(total_tasks: int, config: MultiprocessConfig) -> i
 def run_parallel_tasks(
     task_function: Callable,
     task_args_list: List[tuple],
+    config: MultiprocessConfig,
 ) -> List[Any]:
     """
     並行執行多個任務
@@ -77,7 +54,6 @@ def run_parallel_tasks(
     Returns:
         結果列表（保持原始順序）
     """
-    config = MultiprocessConfig()
     total_tasks = len(task_args_list)
 
     # 如果不啟用多進程或只有一個任務，使用順序執行

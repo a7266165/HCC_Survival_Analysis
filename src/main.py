@@ -68,9 +68,12 @@ def main():
 
     # 使用多進程工具執行實驗
     logger.info(f"準備執行 {len(experiment_args)} 個實驗")
+    multiprocess_config = load_config("multiprocess_config")
     total_experiments_result = run_parallel_tasks(
         task_function=run_single_experiment,
         task_args_list=experiment_args,
+        config=multiprocess_config
+
     )
 
     logger.info("所有實驗完成，共 %d 筆資料", len(total_experiments_result))
