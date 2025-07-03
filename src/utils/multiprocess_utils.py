@@ -72,7 +72,6 @@ def run_parallel_tasks(
     Args:
         task_function: 要執行的函數
         task_args_list: 任務參數列表
-        config: 多進程配置（若無則使用預設）
         task_name: 任務名稱（用於日誌）
 
     Returns:
