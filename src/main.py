@@ -20,18 +20,12 @@ logging.getLogger("shap").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("sklearn").setLevel(logging.WARNING)
 
-
-def setup_logging():
-    fmt = "%(asctime)s %(name)s [%(levelname)s] %(message)s"
-    logging.basicConfig(level=logging.INFO, format=fmt, datefmt="%Y-%m-%d %H:%M:%S")
-
-
 def main():
 
     # ========================================
     # step 0: 啟動logger
     # ========================================
-    setup_logging()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     logger = logging.getLogger(__name__)
     logger.info("程式啟動，開始讀取設定檔")
 
