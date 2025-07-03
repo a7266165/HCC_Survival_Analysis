@@ -20,12 +20,17 @@ logging.getLogger("shap").setLevel(logging.WARNING)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("sklearn").setLevel(logging.WARNING)
 
+
 def main():
 
     # ========================================
     # step 0: 啟動logger
     # ========================================
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     logger = logging.getLogger(__name__)
     logger.info("程式啟動，開始讀取設定檔")
 
@@ -51,7 +56,6 @@ def main():
 
     # 準備所有實驗的參數
     experiment_args = []
-
     for model_type in experiment_config.experiment_settings.models_to_train:
         for random_seed in range(experiment_config.experiment_settings.num_experiments):
             args = (
@@ -70,8 +74,7 @@ def main():
     total_experiments_result = run_parallel_tasks(
         task_function=run_single_experiment,
         task_args_list=experiment_args,
-        config=multiprocess_config
-
+        config=multiprocess_config,
     )
 
     logger.info("所有實驗完成，共 %d 筆資料", len(total_experiments_result))

@@ -45,7 +45,9 @@ class ExperimentResult:
 # 實驗函數
 # ========================================
 def run_single_experiment(
-    args: Tuple[pd.DataFrame, PreprocessConfig, FeatureConfig, int, str, ExperimentConfig],
+    args: Tuple[
+        pd.DataFrame, PreprocessConfig, FeatureConfig, int, str, ExperimentConfig
+    ],
 ) -> ExperimentResult:
     """
     執行單一實驗的包裝函數，用於並行處理
@@ -145,10 +147,7 @@ def single_experimentor(
     # 執行對應的實驗
     experiment_function = model_experiment_map[model_type]
     experiment_result = experiment_function(
-        processed_df, 
-        feature_config, 
-        random_seed, 
-        experiment_config
+        processed_df, feature_config, random_seed, experiment_config
     )
 
     # 記錄實驗結果
@@ -529,7 +528,7 @@ def _build_predictions_df(patient_ids, preds):
 # ========================================
 
 
-def calibrate_predictions_knn_km(
+def _calibrate_predictions_knn_km(
     train_predictions: pd.DataFrame,
     test_predictions: pd.DataFrame,
     train_labels: pd.DataFrame,
@@ -546,7 +545,7 @@ def calibrate_predictions_knn_km(
     )
     test_merged = pd.merge(test_predictions, test_labels, on="patient_id", how="inner")
 
-    # 準備KNN模型（基於訓練集）
+    # 以訓練集準備KNN模型
     X_train = train_merged[["predicted_survival_time"]].values
     nn_model = NearestNeighbors(n_neighbors=min(k, len(train_merged)))
     nn_model.fit(X_train)
@@ -582,7 +581,7 @@ def calibrate_predictions_knn_km(
     return result_df[["patient_id", "calibrated_prediction"]]
 
 
-def calibrate_predictions_regression(
+def _calibrate_predictions_regression(
     train_predictions: pd.DataFrame,
     test_predictions: pd.DataFrame,
     train_labels: pd.DataFrame,
@@ -627,7 +626,7 @@ def calibrate_predictions_regression(
     return result_df[["patient_id", "calibrated_prediction"]]
 
 
-def calibrate_predictions_segmental(
+def _calibrate_predictions_segmental(
     train_predictions: pd.DataFrame,
     test_predictions: pd.DataFrame,
     train_labels: pd.DataFrame,
@@ -685,7 +684,7 @@ def calibrate_predictions_segmental(
     return result_df[["patient_id", "calibrated_prediction"]]
 
 
-def calibrate_predictions_curve(
+def _calibrate_predictions_curve(
     train_predictions: pd.DataFrame,
     test_predictions: pd.DataFrame,
     train_labels: pd.DataFrame,
@@ -757,14 +756,16 @@ def apply_calibration_to_experiment(
 
     # 校正方法映射
     calibration_functions = {
-        "knn_km": calibrate_predictions_knn_km,
-        "regression": calibrate_predictions_regression,
-        "segmental": calibrate_predictions_segmental,
-        "curve": calibrate_predictions_curve,
+        "knn_km": _calibrate_predictions_knn_km,
+        "regression": _calibrate_predictions_regression,
+        "segmental": _calibrate_predictions_segmental,
+        "curve": _calibrate_predictions_curve,
     }
 
     # 應用每種校正方法
-    calibration_methods = list(experiment_config.experiment_settings.calibration_methods)
+    calibration_methods = list(
+        experiment_config.experiment_settings.calibration_methods
+    )
     for method in calibration_methods:
         if method not in calibration_functions:
             logger.warning(f"未知的校正方法: {method}")
@@ -869,7 +870,7 @@ def apply_whatif_analysis(
             experiment_config,
         )
         experiment_result.whatif_continuous_results = continuous_results
-        logger.info(f"完成 {len(continuous_results)} 個特徵分析")
+        logger.info(f"完成 {len(continuous_results)} 個連續特徵分析")
 
 
 def _get_feature_columns(experiment_result: ExperimentResult) -> List[str]:
@@ -909,17 +910,12 @@ def _analyze_treatment_modifications(
     results = {}
 
     # 確認哪些治療在特徵中
-    available_treatments = [t for t in experiment_config.whatif_settings.treatments if t in feature_cols]
+    available_treatments = [
+        t for t in experiment_config.whatif_settings.treatments if t in feature_cols
+    ]
     if not available_treatments:
         logger.warning("沒有可用的治療特徵")
         return results
-
-    # 確保使用正確的特徵順序（特別是 XGBoost）
-    if model_type == "XGBoost_AFT" and hasattr(model, "feature_names"):
-        # 使用模型訓練時的特徵順序
-        ordered_features = model.feature_names
-        if all(f in test_df.columns for f in ordered_features):
-            feature_cols = ordered_features
 
     # 是否按期別分層
     if (
@@ -934,7 +930,9 @@ def _analyze_treatment_modifications(
 
     # 對每個期別分析
     for stage in stages:
-        stage_df = test_df[test_df[experiment_config.whatif_settings.stage_column] == stage]
+        stage_df = test_df[
+            test_df[experiment_config.whatif_settings.stage_column] == stage
+        ]
         if stage_df.empty:
             continue
 
@@ -958,7 +956,10 @@ def _analyze_treatment_modifications(
             for treatment in available_treatments:
                 X_modified = X_original.copy()
 
-                if experiment_config.whatif_settings.treatment_mode == "single_treatment":
+                if (
+                    experiment_config.whatif_settings.treatment_mode
+                    == "single_treatment"
+                ):
                     # 單一治療模式：關閉所有治療，只開啟目標治療
                     for idx, col in enumerate(feature_cols):
                         if col in available_treatments:
@@ -1012,13 +1013,10 @@ def _analyze_continuous_modifications(
     """分析連續特徵修改的影響"""
     results = {}
 
-    # 確保使用正確的特徵順序（特別是 XGBoost）
-    if model_type == "XGBoost_AFT" and hasattr(model, "feature_names"):
-        ordered_features = model.feature_names
-        if all(f in test_df.columns for f in ordered_features):
-            feature_cols = ordered_features
-
-    for feature_name, feature_config in experiment_config.whatif_settings.continuous_features.items():
+    for (
+        feature_name,
+        feature_config,
+    ) in experiment_config.whatif_settings.continuous_features.items():
         if not feature_config.get("enabled", False):
             continue
 
