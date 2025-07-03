@@ -6,9 +6,7 @@ from utils.config_utils import (
     PathConfig,
     PreprocessConfig,
     FeatureConfig,
-    ModelSettings,  # 改成新的
     ExperimentConfig,
-    WhatIfSettings,  # 改成新的
 )
 from lifelines.utils import concordance_index
 import shap
@@ -27,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ExperimentResult:
-    """實驗結果封裝，包含校正結果和 What-if 分析結果"""
+    """封裝實驗及校正結果"""
 
     model_type: str
     train_predictions: pd.DataFrame
@@ -47,13 +45,20 @@ class ExperimentResult:
 # 實驗函數
 # ========================================
 def run_single_experiment(
-    args: Tuple[pd.DataFrame, any, any, int, str, any, any, List[str]],
+    args: Tuple[pd.DataFrame, any, any, int, str, any, List[str]],
 ) -> ExperimentResult:
     """
     執行單一實驗的包裝函數，用於並行處理
 
     Args:
         args: 包含所有必要參數的元組
+            - processed_df: 處理後的數據
+            - preprocess_config: 預處理配置
+            - feature_config: 特徵配置
+            - random_seed: 隨機種子
+            - model_type: 模型類型
+            - experiment_config: 實驗配置
+            - calibration_methods: 校正方法列表
 
     Returns:
         實驗結果
@@ -64,8 +69,7 @@ def run_single_experiment(
         feature_config,
         random_seed,
         model_type,
-        model_settings,
-        whatif_settings,
+        experiment_config,
         calibration_methods,
     ) = args
 
@@ -86,7 +90,7 @@ def run_single_experiment(
         feature_config,
         random_seed,
         model_type,
-        model_settings,
+        experiment_config,
     )
 
     # 校正
@@ -102,7 +106,7 @@ def run_single_experiment(
         apply_whatif_analysis(
             single_experiment_result,
             processed_df,
-            whatif_settings,
+            experiment_config,
         )
 
         logger.info(
@@ -119,7 +123,7 @@ def single_experimentor(
     feature_config: FeatureConfig,
     random_seed: int,
     model_type: str,
-    model_settings: ModelSettings,
+    experiment_config: ExperimentConfig,
 ):
     """
     根據模型類型進行相應的數據準備和訓練
@@ -143,7 +147,10 @@ def single_experimentor(
     # 執行對應的實驗
     experiment_function = model_experiment_map[model_type]
     experiment_result = experiment_function(
-        processed_df, feature_config, random_seed, model_settings
+        processed_df, 
+        feature_config, 
+        random_seed, 
+        experiment_config
     )
 
     # 記錄實驗結果
@@ -159,7 +166,7 @@ def _cox_full_experiment(
     processed_df: pd.DataFrame,
     feature_config: FeatureConfig,
     random_seed: int,
-    model_settings: ModelSettings,
+    experiment_config: ExperimentConfig,
 ):
     from lifelines import CoxPHFitter
 
@@ -170,7 +177,7 @@ def _cox_full_experiment(
     logger.info("開始訓練模型...")
     train_data, test_data = train_test_split(
         cph_df,
-        test_size=model_settings.test_size,
+        test_size=experiment_config.model_settings.test_size,
         random_state=random_seed,
         stratify=cph_df["event"],
     )
@@ -251,7 +258,7 @@ def _xgboost_full_experiment(
     processed_df: pd.DataFrame,
     feature_config: FeatureConfig,
     random_seed: int,
-    model_settings: ModelSettings,
+    experiment_config: ExperimentConfig,
 ):
     import xgboost as xgb
 
@@ -266,10 +273,10 @@ def _xgboost_full_experiment(
     y_lower = y["time"].values.copy()
     y_upper = y["time"].values.copy()
 
-    if model_settings.censor_limit == "inf":
+    if experiment_config.model_settings.censor_limit == "inf":
         y_upper[processed_df["event"] == 0] = np.inf
-    elif model_settings.censor_limit == "avg_life-age":
-        age_diff = model_settings.average_age - X["Age"]
+    elif experiment_config.model_settings.censor_limit == "avg_life-age":
+        age_diff = experiment_config.model_settings.average_age - X["Age"]
         age_diff[age_diff < 0] = 0
         censored_mask = processed_df["event"] == 0
         y_upper[censored_mask] = (
@@ -298,7 +305,7 @@ def _xgboost_full_experiment(
         y_lower,
         y_upper,
         patient_id_mapping,  # ← 一起分割患者ID
-        test_size=model_settings.test_size,
+        test_size=experiment_config.model_settings.test_size,
         random_state=random_seed,
         stratify=processed_df["event"],
     )
@@ -388,7 +395,7 @@ def _catboost_full_experiment(
     processed_df: pd.DataFrame,
     feature_config: FeatureConfig,
     random_seed: int,
-    model_settings: ModelSettings,
+    experiment_config: ExperimentConfig,
 ):
     from catboost import CatBoostRegressor, Pool
 
@@ -403,10 +410,10 @@ def _catboost_full_experiment(
     y_lower = y["time"].values.copy()
     y_upper = y["time"].values.copy()
 
-    if model_settings.censor_limit == "inf":
+    if experiment_config.model_settings.censor_limit == "inf":
         y_upper[processed_df["event"] == 0] = np.inf
-    elif model_settings.censor_limit == "avg_life-age":
-        age_diff = model_settings.average_age - X["Age"]
+    elif experiment_config.model_settings.censor_limit == "avg_life-age":
+        age_diff = experiment_config.model_settings.average_age - X["Age"]
         age_diff[age_diff < 0] = 0
         censored_mask = processed_df["event"] == 0
         y_upper[censored_mask] = (
@@ -432,7 +439,7 @@ def _catboost_full_experiment(
         y_lower,
         processed_df["event"],
         patient_id_mapping,
-        test_size=model_settings.test_size,
+        test_size=experiment_config.model_settings.test_size,
         random_state=random_seed,
         stratify=processed_df["event"],
     )
@@ -813,7 +820,7 @@ def apply_calibration_to_experiment(
 def apply_whatif_analysis(
     experiment_result: ExperimentResult,
     processed_df: pd.DataFrame,
-    whatif_settings: WhatIfSettings,
+    experiment_config: ExperimentConfig,
 ) -> None:
     """
     對單個實驗結果應用 What-if 分析
@@ -840,27 +847,27 @@ def apply_whatif_analysis(
         return
 
     # 1. 治療方式分析
-    if whatif_settings.analyze_treatments:
+    if experiment_config.whatif_settings.analyze_treatments:
         logger.info("執行治療方式 What-if 分析...")
         treatment_results = _analyze_treatment_modifications(
             model,
             model_type,
             test_df,
             feature_cols,
-            whatif_settings,
+            experiment_config,
         )
         experiment_result.whatif_treatment_results = treatment_results
         logger.info(f"完成 {len(treatment_results)} 種治療分析")
 
     # 2. 連續特徵分析
-    if whatif_settings.analyze_continuous:
+    if experiment_config.whatif_settings.analyze_continuous:
         logger.info("執行連續特徵 What-if 分析...")
         continuous_results = _analyze_continuous_modifications(
             model,
             model_type,
             test_df,
             feature_cols,
-            whatif_settings,
+            experiment_config,
         )
         experiment_result.whatif_continuous_results = continuous_results
         logger.info(f"完成 {len(continuous_results)} 個特徵分析")
@@ -897,13 +904,13 @@ def _analyze_treatment_modifications(
     model_type: str,
     test_df: pd.DataFrame,
     feature_cols: List[str],
-    whatif_settings: WhatIfSettings,
+    experiment_config: ExperimentConfig,
 ) -> Dict[str, pd.DataFrame]:
     """分析治療方式修改的影響"""
     results = {}
 
     # 確認哪些治療在特徵中
-    available_treatments = [t for t in whatif_settings.treatments if t in feature_cols]
+    available_treatments = [t for t in experiment_config.whatif_settings.treatments if t in feature_cols]
     if not available_treatments:
         logger.warning("沒有可用的治療特徵")
         return results
@@ -917,18 +924,18 @@ def _analyze_treatment_modifications(
 
     # 是否按期別分層
     if (
-        whatif_settings.stratify_by_stage
-        and whatif_settings.stage_column in test_df.columns
+        experiment_config.whatif_settings.stratify_by_stage
+        and experiment_config.whatif_settings.stage_column in test_df.columns
     ):
-        stages = test_df[whatif_settings.stage_column].unique()
+        stages = test_df[experiment_config.whatif_settings.stage_column].unique()
     else:
         stages = ["all"]
         test_df["temp_stage"] = "all"
-        whatif_settings.stage_column = "temp_stage"
+        experiment_config.whatif_settings.stage_column = "temp_stage"
 
     # 對每個期別分析
     for stage in stages:
-        stage_df = test_df[test_df[whatif_settings.stage_column] == stage]
+        stage_df = test_df[test_df[experiment_config.whatif_settings.stage_column] == stage]
         if stage_df.empty:
             continue
 
@@ -952,7 +959,7 @@ def _analyze_treatment_modifications(
             for treatment in available_treatments:
                 X_modified = X_original.copy()
 
-                if whatif_settings.treatment_mode == "single_treatment":
+                if experiment_config.whatif_settings.treatment_mode == "single_treatment":
                     # 單一治療模式：關閉所有治療，只開啟目標治療
                     for idx, col in enumerate(feature_cols):
                         if col in available_treatments:
@@ -1001,7 +1008,7 @@ def _analyze_continuous_modifications(
     model_type: str,
     test_df: pd.DataFrame,
     feature_cols: List[str],
-    whatif_settings: WhatIfSettings,
+    experiment_config: ExperimentConfig,
 ) -> Dict[str, pd.DataFrame]:
     """分析連續特徵修改的影響"""
     results = {}
@@ -1012,7 +1019,7 @@ def _analyze_continuous_modifications(
         if all(f in test_df.columns for f in ordered_features):
             feature_cols = ordered_features
 
-    for feature_name, feature_config in whatif_settings.continuous_features.items():
+    for feature_name, feature_config in experiment_config.whatif_settings.continuous_features.items():
         if not feature_config.get("enabled", False):
             continue
 

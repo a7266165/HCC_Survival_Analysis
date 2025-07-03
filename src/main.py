@@ -60,8 +60,7 @@ def main():
                 feature_config,
                 random_seed,
                 model_type,
-                experiment_config.model_settings,
-                experiment_config.whatif_settings,
+                experiment_config,
                 list(experiment_config.experiment_settings.calibration_methods),
             )
             experiment_args.append(args)
