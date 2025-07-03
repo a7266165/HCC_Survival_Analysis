@@ -65,7 +65,6 @@ def calculate_optimal_workers(total_tasks: int, config: MultiprocessConfig) -> i
 def run_parallel_tasks(
     task_function: Callable,
     task_args_list: List[tuple],
-    config: MultiprocessConfig = None,
 ) -> List[Any]:
     """
     並行執行多個任務
@@ -79,9 +78,7 @@ def run_parallel_tasks(
     Returns:
         結果列表（保持原始順序）
     """
-    if config is None:
-        config = MultiprocessConfig()
-
+    config = MultiprocessConfig()
     total_tasks = len(task_args_list)
 
     # 如果不啟用多進程或只有一個任務，使用順序執行

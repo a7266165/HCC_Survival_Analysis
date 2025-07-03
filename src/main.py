@@ -48,7 +48,6 @@ def main():
     # Step 3: 進行實驗
     # ========================================
     experiment_config = load_config("experiment_config")
-    multiprocess_config = MultiprocessConfig()
 
     # 準備所有實驗的參數
     experiment_args = []
@@ -72,7 +71,6 @@ def main():
     total_experiments_result = run_parallel_tasks(
         task_function=run_single_experiment,
         task_args_list=experiment_args,
-        config=multiprocess_config,
     )
 
     logger.info("所有實驗完成，共 %d 筆資料", len(total_experiments_result))
