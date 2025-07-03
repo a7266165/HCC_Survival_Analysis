@@ -45,7 +45,7 @@ class ExperimentResult:
 # 實驗函數
 # ========================================
 def run_single_experiment(
-    args: Tuple[pd.DataFrame, any, any, int, str, any, List[str]],
+    args: Tuple[pd.DataFrame, PreprocessConfig, FeatureConfig, int, str, ExperimentConfig],
 ) -> ExperimentResult:
     """
     執行單一實驗的包裝函數，用於並行處理
@@ -58,7 +58,6 @@ def run_single_experiment(
             - random_seed: 隨機種子
             - model_type: 模型類型
             - experiment_config: 實驗配置
-            - calibration_methods: 校正方法列表
 
     Returns:
         實驗結果
@@ -70,7 +69,6 @@ def run_single_experiment(
         random_seed,
         model_type,
         experiment_config,
-        calibration_methods,
     ) = args
 
     # 重設 logging ，避免多進程的 logging 衝突
@@ -99,7 +97,7 @@ def run_single_experiment(
         apply_calibration_to_experiment(
             single_experiment_result,
             processed_df,
-            calibration_methods,
+            experiment_config,
         )
 
         logger.info(f"開始 What-if 分析")
@@ -740,7 +738,7 @@ def calibrate_predictions_curve(
 def apply_calibration_to_experiment(
     experiment_result: ExperimentResult,
     processed_df: pd.DataFrame,
-    calibration_methods: List[str],
+    experiment_config: ExperimentConfig,
 ) -> None:
     """
     對單個實驗結果應用多種校正方法
@@ -766,6 +764,7 @@ def apply_calibration_to_experiment(
     }
 
     # 應用每種校正方法
+    calibration_methods = list(experiment_config.experiment_settings.calibration_methods)
     for method in calibration_methods:
         if method not in calibration_functions:
             logger.warning(f"未知的校正方法: {method}")

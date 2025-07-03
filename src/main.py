@@ -61,7 +61,6 @@ def main():
                 random_seed,
                 model_type,
                 experiment_config,
-                list(experiment_config.experiment_settings.calibration_methods),
             )
             experiment_args.append(args)
 
