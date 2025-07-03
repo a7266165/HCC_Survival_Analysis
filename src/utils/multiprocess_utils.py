@@ -138,17 +138,3 @@ def run_parallel_tasks(
     logger.info(f"所有實驗執行完成，共 {total_tasks} 個")
 
     return results
-
-
-def setup_subprocess_logging(log_level: str = "INFO"):
-    """
-    為子進程設定日誌（避免多進程的日誌衝突）
-
-    Args:
-        log_level: 日誌級別
-    """
-    logging.basicConfig(
-        level=getattr(logging, log_level),
-        format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )

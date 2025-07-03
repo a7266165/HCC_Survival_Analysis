@@ -69,8 +69,6 @@ def main():
 
     # 使用多進程工具執行實驗
     logger.info(f"準備執行 {len(experiment_args)} 個實驗")
-
-    # 執行所有實驗
     total_experiments_result = run_parallel_tasks(
         task_function=run_single_experiment,
         task_args_list=experiment_args,
