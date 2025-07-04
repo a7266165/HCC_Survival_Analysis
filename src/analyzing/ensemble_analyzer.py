@@ -85,8 +85,6 @@ class EnsembleAnalyzer:
         Returns:
             完整的分析結果封裝
         """
-        self.logger.info("開始完整的Ensemble分析...")
-
         try:
             # 1. Ensemble預測
             self.logger.info("1/5 生成Ensemble預測...")
