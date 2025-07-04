@@ -869,28 +869,17 @@ def apply_whatif_analysis(
 
 
 def _get_feature_columns(experiment_result: ExperimentResult) -> List[str]:
-    """從實驗結果中獲取特徵列名稱"""
-    # 對於 XGBoost，優先從模型獲取
-    model = experiment_result.model
-    if experiment_result.model_type == "XGBoost_AFT":
-        # XGBoost 的 Booster 物件
-        if hasattr(model, "feature_names"):
-            return model.feature_names
-        # 嘗試從 feature_importance 獲取（但要確保順序正確）
-        if "xgb_gain" in experiment_result.feature_importance:
-            # 從訓練時儲存的 shap_results 獲取正確順序
-            if "feature_names" in experiment_result.shap_results:
-                return experiment_result.shap_results["feature_names"]
+    """
+    從實驗結果中獲取特徵列名稱
+    """
+    if (
+        experiment_result.shap_results
+        and "feature_names" in experiment_result.shap_results
+    ):
+        return experiment_result.shap_results["feature_names"]
 
-    # 其他模型從 feature_importance 獲取
-    for method in ["catboost_prediction", "cox_coefficients", "shap_importance"]:
-        if method in experiment_result.feature_importance:
-            return list(experiment_result.feature_importance[method].keys())
-
-    # 如果都沒有，嘗試從模型獲取
-    if hasattr(model, "feature_names_"):
-        return list(model.feature_names_)
-
+    # 如果都沒有，返回空列表
+    logger.warning(f"無法從 {experiment_result.model_type} 模型中獲取特徵名稱")
     return []
 
 
