@@ -826,11 +826,6 @@ def apply_whatif_analysis(
     對單個實驗結果應用 What-if 分析
     直接更新 experiment_result 物件
     """
-    # 首先在 ExperimentResult 加入新欄位
-    if not hasattr(experiment_result, "whatif_treatment_results"):
-        experiment_result.whatif_treatment_results = {}
-    if not hasattr(experiment_result, "whatif_continuous_results"):
-        experiment_result.whatif_continuous_results = {}
 
     # 獲取模型和特徵
     model = experiment_result.model
