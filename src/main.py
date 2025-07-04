@@ -95,7 +95,7 @@ def main():
     logger.info("開始生成視覺化圖表...")
 
     # 建立視覺化工具
-    visualizer = SurvivalVisualizer(path_config)
+    visualizer = SurvivalVisualizer(path_config, processed_df, total_experiments_result)
 
     # 生成特徵重要性熱圖
     visualizer.plot_feature_importance_heatmap(top_n=20)
@@ -106,71 +106,26 @@ def main():
     # 生成 K/U 群組分析圖
     visualizer.plot_ku_group_metrics()
 
-    # 生成校正前後散點圖
-    visualizer.plot_calibration_scatter(processed_df)
+    # 校正前後的散點圖
+    visualizer.plot_calibration_scatter()
 
-    # TODO: 待精簡
-    # === 新增的視覺化功能 ===
-    logger.info("生成新的視覺化分析...")
+    # 存活曲線
+    visualizer.plot_survival_curves(risk_groups=3)  # 分成低、中、高風險三組
 
-    # 1. 生存曲線分析
-    try:
-        visualizer.plot_survival_curves(
-            processed_df=processed_df, risk_groups=3  # 分成低、中、高風險三組
-        )
-        logger.info("✓ 生存曲線分析完成")
-    except Exception as e:
-        logger.warning(f"生存曲線分析失敗: {e}")
+    # What-if 治療分析結果視覺化
+    visualizer.plot_whatif_treatment_analysis()
 
-    # 2. What-if 治療分析視覺化
-    try:
-        # 只有在有What-if分析結果時才執行
-        if any(r and r.whatif_treatment_results for r in total_experiments_result):
-            visualizer.plot_whatif_treatment_analysis(
-                experiment_results=total_experiments_result
-            )
-            logger.info("✓ What-if治療分析視覺化完成")
-        else:
-            logger.info("跳過What-if治療分析視覺化（無相關資料）")
-    except Exception as e:
-        logger.warning(f"What-if治療分析視覺化失敗: {e}")
+    # What-if 連續特徵分析視覺化
+    visualizer.plot_whatif_continuous_analysis()
 
-    # 3. What-if 連續特徵分析視覺化
-    try:
-        # 只有在有What-if連續特徵分析結果時才執行
-        if any(r and r.whatif_continuous_results for r in total_experiments_result):
-            visualizer.plot_whatif_continuous_analysis(
-                experiment_results=total_experiments_result
-            )
-            logger.info("✓ What-if連續特徵分析視覺化完成")
-        else:
-            logger.info("跳過What-if連續特徵分析視覺化（無相關資料）")
-    except Exception as e:
-        logger.warning(f"What-if連續特徵分析視覺化失敗: {e}")
+    # 時間序列預測分析
+    visualizer.plot_temporal_prediction_analysis(time_bins=10)  # 將時間分成10個區間
 
-    # 4. 時間序列預測分析
-    try:
-        visualizer.plot_temporal_prediction_analysis(
-            processed_df=processed_df, time_bins=10  # 將時間分成10個區間
-        )
-        logger.info("✓ 時間序列預測分析完成")
-    except Exception as e:
-        logger.warning(f"時間序列預測分析失敗: {e}")
-
-    # 5. 不同時間點的預測準確度
-    try:
-        visualizer.plot_prediction_accuracy_by_time(
-            processed_df=processed_df,
-            time_points=[6, 12, 24, 36, 60],  # 6個月、1年、2年、3年、5年
-        )
-        logger.info("✓ 時間點預測準確度分析完成")
-    except Exception as e:
-        logger.warning(f"時間點預測準確度分析失敗: {e}")
-
-    logger.info("========================================")
-    logger.info("所有分析完成！")
-    logger.info(f"結果已儲存至: {path_config.result_save_dir}")
-    logger.info("========================================")
+    # 不同時間點的預測準確度
+    visualizer.plot_prediction_accuracy_by_time(
+        time_points=[6, 12, 24, 36, 60]  # 6個月、1年、2年、3年、5年
+    )
+    logger.info("實驗完成！")
 
 
 if __name__ == "__main__":
