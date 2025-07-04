@@ -7,13 +7,7 @@ from experimenting.experimentor import (
     run_single_experiment,
     save_experiment_results,
 )
-from analyzing.ensemble_analyzer import (
-    ensemble_predictions_by_seed,
-    ensemble_feature_importance,
-    calculate_ensemble_metrics,
-    analyze_survival_predictions,
-    compare_calibration_methods,
-)
+from analyzing.ensemble_analyzer import EnsembleAnalyzer
 from analyzing.visualizer import SurvivalVisualizer
 
 logging.getLogger("shap").setLevel(logging.WARNING)
@@ -84,39 +78,16 @@ def main():
     # Step 4: 進階Ensemble分析
     # ========================================
     logger.info("開始Ensemble分析...")
-    # 4.1 Ensemble預測（包含校正結果）
-    ensemble_preds = ensemble_predictions_by_seed(
-        total_experiments_result,
-        path_config,
-        include_calibrated=True,  # 包含校正結果
+    ensemble_analyzer = EnsembleAnalyzer(path_config)
+
+    analysis_results = ensemble_analyzer.run_complete_analysis(
+        experiment_results=total_experiments_result,
+        processed_df=processed_df,
+        include_calibrated=True,
     )
 
-    # 4.2 特徵重要性分析（不受校正影響）
-    ensemble_importance = ensemble_feature_importance(
-        total_experiments_result,
-        path_config,
-    )
-
-    # 4.3 計算Ensemble指標（包含校正結果）
-    ensemble_metrics = calculate_ensemble_metrics(
-        ensemble_preds,
-        processed_df,
-        total_experiments_result,
-        path_config,
-    )
-
-    # 4.4 生存數據分析（包含校正結果）
-    survival_analysis = analyze_survival_predictions(
-        ensemble_preds, processed_df, path_config
-    )
-
-    # 4.5 比較不同校正方法的效果
-    calibration_comparison = compare_calibration_methods(
-        survival_analysis,
-        path_config,
-    )
-    if not calibration_comparison.empty:
-        logger.info("完成校正方法比較分析")
+    summary = ensemble_analyzer.get_analysis_summary()
+    logger.info(f"分析摘要: {summary}")
 
     # ========================================
     # Step 5: 視覺化分析結果
@@ -137,8 +108,6 @@ def main():
 
     # 生成校正前後散點圖
     visualizer.plot_calibration_scatter(processed_df)
-
-    logger.info("視覺化完成！")
 
 
 if __name__ == "__main__":
