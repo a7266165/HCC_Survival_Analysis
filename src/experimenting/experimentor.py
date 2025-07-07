@@ -169,7 +169,7 @@ def _cox_full_experiment(
 
     patient_id_mapping = processed_df[feature_config.patient_id].copy()
     cph_df = processed_df.copy()
-    cph_df = cph_df.drop(columns=feature_config.source + feature_config.patient_id)
+    cph_df = cph_df.drop(columns=[feature_config.source, feature_config.patient_id])
 
     logger.info("開始訓練模型...")
     train_data, test_data = train_test_split(
@@ -207,7 +207,9 @@ def _cox_full_experiment(
         col
         for col in train_data.columns
         if col
-        not in list(feature_config.survival_labels) + list(feature_config.other_labels)
+        not in list(feature_config.survival_labels)
+        + [feature_config.source]
+        + [feature_config.patient_id]
     ]
     X_train_features = train_data[feature_cols]
     X_test_features = test_data[feature_cols]
@@ -232,12 +234,16 @@ def _cox_full_experiment(
     }
 
     # ===============================================
-    # CPH原生的特徵重要性
+    # 特徵重要性
     # ===============================================
     feature_importance = {}
 
+    # 法一: cph_coef_importance
     cox_coef_importance = np.abs(model.params_).to_dict()
     feature_importance["cox_coefficients"] = cox_coef_importance
+    # 法二: SHAP 值的平均絕對值
+    mean_abs_shap = np.abs(kernel_shap_values).mean(axis=0)
+    feature_importance["shap_importance"] = dict(zip(feature_cols, mean_abs_shap))
 
     return ExperimentResult(
         model_type="CoxPHFitter",
@@ -1067,8 +1073,11 @@ def _predict_with_model(
 ) -> float:
     """統一的預測介面，處理不同模型類型"""
     try:
+
+        if model_type == "CoxPHFitter":
+            X_df = pd.DataFrame(X, columns=feature_names)
+            return model.predict_expectation(X_df).values[0]
         if model_type == "XGBoost_AFT":
-            # XGBoost 需要 feature_names 和 enable_categorical
             dmatrix = xgb.DMatrix(
                 X, feature_names=feature_names, enable_categorical=True
             )

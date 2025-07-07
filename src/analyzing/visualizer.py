@@ -558,9 +558,7 @@ class SurvivalVisualizer:
         all_predictions = all_predictions.merge(true_data, on="patient_id", how="left")
 
         # 取得模型列表（排除 CoxPHFitter，因為沒有校正）
-        models = [
-            m for m in all_predictions["model_type"].unique() if m != "CoxPHFitter"
-        ]
+        models = [m for m in all_predictions["model_type"].unique()]
 
         # 校正方法
         calibration_methods = ["knn_km", "regression", "segmental", "curve"]
