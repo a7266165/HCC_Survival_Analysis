@@ -169,7 +169,7 @@ def _cox_full_experiment(
 
     patient_id_mapping = processed_df[feature_config.patient_id].copy()
     cph_df = processed_df.copy()
-    cph_df = cph_df.drop(columns=[feature_config.source, feature_config.patient_id])
+    cph_df = cph_df.drop(columns=[feature_config.source, feature_config.patient_id, feature_config.BCLC_stage])
 
     logger.info("開始訓練模型...")
     train_data, test_data = train_test_split(
@@ -269,7 +269,7 @@ def _xgboost_full_experiment(
 
     X = processed_df.drop(
         columns=list(feature_config.survival_labels)
-        + [feature_config.source, feature_config.patient_id]
+        + [feature_config.source, feature_config.patient_id, feature_config.BCLC_stage]
     )
     y = processed_df[list(feature_config.survival_labels)]
 
@@ -406,7 +406,7 @@ def _catboost_full_experiment(
 
     X = processed_df.drop(
         columns=list(feature_config.survival_labels)
-        + [feature_config.source, feature_config.patient_id]
+        + [feature_config.source, feature_config.patient_id, feature_config.BCLC_stage]
     )
     y = processed_df[list(feature_config.survival_labels)]
 
