@@ -1308,133 +1308,151 @@ class SurvivalVisualizer:
         logger.info(f"時間序列預測分析圖已儲存至: {save_path}")
 
     def plot_prediction_accuracy_by_time(
-        self,
-        time_points: Optional[List[int]] = None,
-        figsize: Optional[tuple] = None,
-    ) -> None:
-        """
-        繪製不同時間點的預測準確度
+            self,
+            time_points: Optional[List[int]] = None,
+            figsize: Optional[tuple] = None,
+        ) -> None:
+            """
+            繪製不同時間點的預測準確度指標
 
-        Args:
-            time_points: 要評估的時間點列表（月）
-            figsize: 圖片大小
-        """
-        if self.processed_df is None:
-            logger.warning("需要 processed_df 才能繪製時間點預測準確度")
-            return
+            Args:
+                time_points: 要評估的時間點列表（月）
+                figsize: 圖片大小
+            """
+            if self.processed_df is None:
+                logger.warning("需要 processed_df 才能繪製時間點預測準確度")
+                return
 
-        logger.info("繪製不同時間點的預測準確度...")
+            logger.info("繪製不同時間點的預測準確度指標...")
 
-        if time_points is None:
-            time_points = [6, 12, 24, 36, 60]  # 預設時間點
+            if time_points is None:
+                time_points = [6, 12, 24, 36, 60]  # 預設時間點
 
-        # 讀取ensemble預測結果
-        ensemble_dir = self.path_config.ensemble_predictions_dir
-        ensemble_files = list(ensemble_dir.glob("*_ensemble_predictions.csv"))
+            # 讀取ensemble預測結果
+            ensemble_dir = self.path_config.ensemble_predictions_dir
+            ensemble_files = list(ensemble_dir.glob("*_ensemble_predictions.csv"))
 
-        if not ensemble_files:
-            logger.warning("找不到ensemble預測結果")
-            return
+            if not ensemble_files:
+                logger.warning("找不到ensemble預測結果")
+                return
 
-        # 收集所有模型的準確度資料
-        accuracy_data = []
+            # 收集所有模型的準確度資料
+            accuracy_data = []
 
-        for ensemble_file in ensemble_files:
-            predictions = pd.read_csv(ensemble_file)
-            model_name = ensemble_file.stem.replace("_ensemble_predictions", "")
+            for ensemble_file in ensemble_files:
+                predictions = pd.read_csv(ensemble_file)
+                model_name = ensemble_file.stem.replace("_ensemble_predictions", "")
 
-            # 合併預測與真實資料
-            merged = predictions.merge(
-                self.processed_df[["patient_id", "time", "event"]], on="patient_id"
-            )
-
-            # 計算每個時間點的準確度
-            for t in time_points:
-                # 實際生存超過t的患者
-                actual_survived = merged["time"] >= t
-                # 預測生存超過t的患者
-                predicted_survived = merged["ensemble_prediction"] >= t
-
-                # 計算準確度指標
-                tp = ((actual_survived) & (predicted_survived)).sum()
-                tn = ((~actual_survived) & (~predicted_survived)).sum()
-                fp = ((~actual_survived) & (predicted_survived)).sum()
-                fn = ((actual_survived) & (~predicted_survived)).sum()
-
-                accuracy = (tp + tn) / len(merged) if len(merged) > 0 else 0
-                sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
-                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-
-                accuracy_data.append(
-                    {
-                        "model": model_name,
-                        "time_point": t,
-                        "accuracy": accuracy,
-                        "sensitivity": sensitivity,
-                        "specificity": specificity,
-                        "n_patients": len(merged),
-                    }
+                # 合併預測與真實資料
+                merged = predictions.merge(
+                    self.processed_df[["patient_id", "time", "event"]], on="patient_id"
                 )
 
-        if not accuracy_data:
-            logger.warning("無法計算準確度資料")
-            return
+                # 計算每個時間點的準確度
+                for t in time_points:
+                    # 實際生存超過t的患者
+                    actual_survived = merged["time"] >= t
+                    # 預測生存超過t的患者
+                    predicted_survived = merged["ensemble_prediction"] >= t
 
-        # 轉換為DataFrame
-        acc_df = pd.DataFrame(accuracy_data)
+                    # 計算混淆矩陣元素
+                    tp = ((actual_survived) & (predicted_survived)).sum()
+                    tn = ((~actual_survived) & (~predicted_survived)).sum()
+                    fp = ((~actual_survived) & (predicted_survived)).sum()
+                    fn = ((actual_survived) & (~predicted_survived)).sum()
 
-        # 設定圖片大小
-        if figsize is None:
-            figsize = (16, 6)
+                    # 計算各項指標
+                    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+                    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+                    ppv = tp / (tp + fp) if (tp + fp) > 0 else 0
+                    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+                    
+                    # 計算MCC
+                    denominator = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+                    if denominator > 0:
+                        mcc = (tp * tn - fp * fn) / denominator
+                    else:
+                        mcc = 0
 
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=figsize)
+                    accuracy_data.append(
+                        {
+                            "model": model_name,
+                            "time_point": t,
+                            "mcc": mcc,
+                            "ppv": ppv,
+                            "npv": npv,
+                            "sensitivity": sensitivity,
+                            "specificity": specificity,
+                            "n_patients": len(merged),
+                        }
+                    )
 
-        # 為每個模型繪製曲線
-        for model in acc_df["model"].unique():
-            model_data = acc_df[acc_df["model"] == model]
+            if not accuracy_data:
+                logger.warning("無法計算準確度資料")
+                return
 
-            # 準確度
-            ax1.plot(
-                model_data["time_point"],
-                model_data["accuracy"],
-                marker="o",
-                label=model,
-            )
+            # 轉換為DataFrame
+            acc_df = pd.DataFrame(accuracy_data)
 
-            # 敏感度
-            ax2.plot(
-                model_data["time_point"],
-                model_data["sensitivity"],
-                marker="s",
-                label=model,
-            )
+            # 設定圖片大小
+            if figsize is None:
+                figsize = (20, 8)  # 增加寬度以容納5個子圖
 
-            # 特異度
-            ax3.plot(
-                model_data["time_point"],
-                model_data["specificity"],
-                marker="^",
-                label=model,
-            )
+            # 創建2x3的子圖布局（最後一個位置留空）
+            fig, axes = plt.subplots(2, 3, figsize=figsize)
+            axes = axes.flatten()
 
-        # 設定圖表屬性
-        for ax, metric in zip(
-            [ax1, ax2, ax3], ["Accuracy", "Sensitivity", "Specificity"]
-        ):
-            ax.set_xlabel("Time Point (months)")
-            ax.set_ylabel(metric)
-            ax.set_title(f"{metric} at Different Time Points")
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-            ax.set_ylim(0, 1.05)
-            ax.set_xticks(time_points)
+            # 指標列表和對應的軸
+            metrics = ["mcc", "ppv", "npv", "sensitivity", "specificity"]
+            metric_names = ["MCC", "PPV", "NPV", "Sensitivity", "Specificity"]
+            
+            # 為每個指標繪製圖表
+            for idx, (metric, metric_name) in enumerate(zip(metrics, metric_names)):
+                ax = axes[idx]
+                
+                # 為每個模型繪製曲線
+                for model in acc_df["model"].unique():
+                    model_data = acc_df[acc_df["model"] == model]
+                    
+                    ax.plot(
+                        model_data["time_point"],
+                        model_data[metric],
+                        marker="o",
+                        label=model,
+                        linewidth=2,
+                        markersize=8
+                    )
+                
+                # 設定圖表屬性
+                ax.set_xlabel("Time Point (months)")
+                ax.set_ylabel(metric_name)
+                ax.set_title(f"{metric_name} at Different Time Points")
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc='best')
+                
+                # 根據指標類型設定y軸範圍
+                if metric == "mcc":
+                    ax.set_ylim(-0.1, 1.05)  # MCC可能是負值
+                else:
+                    ax.set_ylim(0, 1.05)
+                    
+                ax.set_xticks(time_points)
 
-        plt.suptitle("Prediction Performance at Specific Time Points", fontsize=16)
-        plt.tight_layout()
+            # 隱藏最後一個空的子圖
+            axes[-1].set_visible(False)
 
-        # 儲存
-        save_path = self.figures_dir / "prediction_accuracy_by_time.png"
-        plt.savefig(save_path)
-        plt.close()
+            # 設定總標題
+            plt.suptitle("Prediction Performance Metrics at Specific Time Points", fontsize=16)
+            plt.tight_layout()
 
-        logger.info(f"時間點預測準確度圖已儲存至: {save_path}")
+            # 儲存
+            save_path = self.figures_dir / "prediction_metrics_by_time.png"
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+
+            logger.info(f"時間點預測準確度指標圖已儲存至: {save_path}")
+            
+            # 額外儲存數據表格以供參考
+            summary_path = self.figures_dir / "prediction_metrics_summary.csv"
+            acc_df.to_csv(summary_path, index=False)
+            logger.info(f"預測指標摘要已儲存至: {summary_path}")
