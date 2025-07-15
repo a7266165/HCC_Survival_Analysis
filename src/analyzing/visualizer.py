@@ -843,191 +843,245 @@ class SurvivalVisualizer:
         logger.info(f"生存曲線已儲存至: {save_path}")
 
     def plot_whatif_treatment_analysis(
-        self,
-        figsize: Optional[tuple] = None,
-    ) -> None:
-        """
-        視覺化What-if治療分析結果 - 表格形式
-        將多次實驗的同一patient_id結果平均後，按治療手段和分期顯示
-        """
-        if self.experiment_results is None:
-            logger.warning("需要 experiment_results 才能繪製What-if治療分析")
-            return
+            self,
+            figsize: Optional[tuple] = None,
+        ) -> None:
+            """
+            視覺化What-if治療分析結果 - 表格形式
+            將多次實驗的同一patient_id結果平均後，按治療手段和分期顯示
+            根據整體平均改良幅度排序（改良幅度大的在上面）
+            """
+            if self.experiment_results is None:
+                logger.warning("需要 experiment_results 才能繪製What-if治療分析")
+                return
 
-        logger.info("生成What-if治療分析表格...")
+            logger.info("生成What-if治療分析表格...")
 
-        # 收集所有治療分析結果
-        all_treatment_results = []
+            # 收集所有治療分析結果
+            all_treatment_results = []
 
-        for result in self.experiment_results:
-            if result and result.whatif_treatment_results:
-                for analysis_name, df in result.whatif_treatment_results.items():
-                    df_copy = df.copy()
-                    df_copy["model_type"] = result.model_type
-                    all_treatment_results.append(df_copy)
+            for result in self.experiment_results:
+                if result and result.whatif_treatment_results:
+                    for analysis_name, df in result.whatif_treatment_results.items():
+                        df_copy = df.copy()
+                        df_copy["model_type"] = result.model_type
+                        all_treatment_results.append(df_copy)
 
-        if not all_treatment_results:
-            logger.warning("沒有找到What-if治療分析結果")
-            return
+            if not all_treatment_results:
+                logger.warning("沒有找到What-if治療分析結果")
+                return
 
-        # 合併所有結果
-        combined_df = pd.concat(all_treatment_results, ignore_index=True)
-        
-        # 先對同一個patient_id的多次實驗結果取平均
-        patient_avg = combined_df.groupby(['patient_id', 'stage']).agg({
-            'treatment_benefit_months': 'mean',
-            'current_treatments': 'first'  # 同一個病人的治療應該是一樣的
-        }).reset_index()
-
-        # 獲取所有治療手段
-        all_treatments = set()
-        for treatments in patient_avg["current_treatments"]:
-            if treatments:  # 確保不是空列表
-                all_treatments.update(treatments)
-        all_treatments = sorted(list(all_treatments))
-
-        # 獲取所有分期
-        stages = sorted(patient_avg["stage"].unique())
-
-        # 創建結果字典
-        results_dict = {}
-        
-        for treatment in all_treatments:
-            results_dict[treatment] = {}
+            # 合併所有結果
+            combined_df = pd.concat(all_treatment_results, ignore_index=True)
             
-            for stage in stages:
-                # 篩選該分期且有使用該治療的病人
-                stage_patients = patient_avg[patient_avg["stage"] == stage]
-                with_treatment = stage_patients[
-                    stage_patients["current_treatments"].apply(lambda x: treatment in x if x else False)
-                ]
+            # 先對同一個patient_id的多次實驗結果取平均
+            patient_avg = combined_df.groupby(['patient_id', 'stage']).agg({
+                'treatment_benefit_months': 'mean',
+                'current_treatments': 'first'  # 同一個病人的治療應該是一樣的
+            }).reset_index()
+
+            # 獲取所有治療手段
+            all_treatments = set()
+            for treatments in patient_avg["current_treatments"]:
+                if treatments:  # 確保不是空列表
+                    all_treatments.update(treatments)
+            all_treatments = list(all_treatments)
+
+            # 獲取所有分期
+            stages = sorted(patient_avg["stage"].unique())
+
+            # 計算每個治療的整體平均改良幅度（用於排序）
+            treatment_overall_benefit = {}
+            
+            for treatment in all_treatments:
+                all_benefits = []
                 
-                if len(with_treatment) > 0:
-                    mean_benefit = with_treatment["treatment_benefit_months"].mean()
-                    std_benefit = with_treatment["treatment_benefit_months"].std()
-                    n_patients = len(with_treatment)
+                for stage in stages:
+                    stage_patients = patient_avg[patient_avg["stage"] == stage]
+                    with_treatment = stage_patients[
+                        stage_patients["current_treatments"].apply(lambda x: treatment in x if x else False)
+                    ]
                     
-                    # 格式化顯示：平均值 ± 標準差 (n=樣本數)
-                    results_dict[treatment][f"Stage_{stage}"] = f"{mean_benefit:.1f}±{std_benefit:.1f} (n={n_patients})"
+                    if len(with_treatment) > 0:
+                        # 收集該治療在該分期的所有效益值
+                        all_benefits.extend(with_treatment["treatment_benefit_months"].tolist())
+                
+                # 計算該治療的整體平均效益
+                if all_benefits:
+                    treatment_overall_benefit[treatment] = np.mean(all_benefits)
                 else:
-                    results_dict[treatment][f"Stage_{stage}"] = "N/A"
-        
-        # 創建DataFrame
-        results_df = pd.DataFrame.from_dict(results_dict, orient='index')
-        
-        # 確保欄位順序正確
-        column_order = [f"Stage_{s}" for s in stages]
-        results_df = results_df[column_order]
-        
-        # 設定圖片大小
-        if figsize is None:
-            figsize = (14, max(8, len(all_treatments) * 0.5))
-        
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.axis('tight')
-        ax.axis('off')
-        
-        # 準備表格數據
-        table_data = []
-        
-        # 添加標題行
-        header = ['Treatment'] + [f'Stage {s}' for s in stages]
-        
-        # 添加數據行
-        for treatment in all_treatments:
-            row = [treatment]
-            for stage in stages:
-                row.append(results_df.loc[treatment, f"Stage_{stage}"])
-            table_data.append(row)
-        
-        # 創建表格
-        table = ax.table(cellText=table_data, 
-                        colLabels=header,
-                        cellLoc='center',
-                        loc='center',
-                        colWidths=[0.2] + [0.16] * len(stages))
-        
-        # 設置表格樣式
-        table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        table.scale(1.2, 1.8)
-        
-        # 設置標題顏色
-        for i in range(len(header)):
-            table[(0, i)].set_facecolor('#4CAF50')
-            table[(0, i)].set_text_props(weight='bold', color='white')
-        
-        # 設置行顏色（交替）
-        for i in range(1, len(table_data) + 1):
-            if i % 2 == 0:
+                    treatment_overall_benefit[treatment] = 0
+            
+            # 根據整體平均效益排序（降序，效益大的在前）
+            all_treatments = sorted(all_treatments, 
+                                key=lambda x: treatment_overall_benefit[x], 
+                                reverse=True)
+
+            # 創建結果字典
+            results_dict = {}
+            
+            for treatment in all_treatments:
+                results_dict[treatment] = {}
+                
+                for stage in stages:
+                    # 篩選該分期且有使用該治療的病人
+                    stage_patients = patient_avg[patient_avg["stage"] == stage]
+                    with_treatment = stage_patients[
+                        stage_patients["current_treatments"].apply(lambda x: treatment in x if x else False)
+                    ]
+                    
+                    if len(with_treatment) > 0:
+                        mean_benefit = with_treatment["treatment_benefit_months"].mean()
+                        std_benefit = with_treatment["treatment_benefit_months"].std()
+                        n_patients = len(with_treatment)
+                        
+                        # 格式化顯示：平均值 ± 標準差 (n=樣本數)
+                        results_dict[treatment][f"Stage_{stage}"] = f"{mean_benefit:.1f}±{std_benefit:.1f} (n={n_patients})"
+                    else:
+                        results_dict[treatment][f"Stage_{stage}"] = "N/A"
+            
+            # 創建DataFrame
+            results_df = pd.DataFrame.from_dict(results_dict, orient='index')
+            
+            # 確保欄位順序正確
+            column_order = [f"Stage_{s}" for s in stages]
+            results_df = results_df[column_order]
+            
+            # 設定圖片大小
+            if figsize is None:
+                figsize = (14, max(8, len(all_treatments) * 0.5))
+            
+            fig, ax = plt.subplots(figsize=figsize)
+            ax.axis('tight')
+            ax.axis('off')
+            
+            # 準備表格數據
+            table_data = []
+            
+            # 添加標題行
+            header = ['Treatment', 'Overall Avg'] + [f'Stage {s}' for s in stages]
+            
+            # 添加數據行（按照排序後的順序）
+            for treatment in all_treatments:
+                row = [treatment]
+                # 添加整體平均效益
+                overall_avg = treatment_overall_benefit[treatment]
+                row.append(f"{overall_avg:.1f}")
+                # 添加各分期數據
+                for stage in stages:
+                    row.append(results_df.loc[treatment, f"Stage_{stage}"])
+                table_data.append(row)
+            
+            # 創建表格
+            table = ax.table(cellText=table_data, 
+                            colLabels=header,
+                            cellLoc='center',
+                            loc='center',
+                            colWidths=[0.2, 0.12] + [0.136] * len(stages))
+            
+            # 設置表格樣式
+            table.auto_set_font_size(False)
+            table.set_fontsize(9)
+            table.scale(1.2, 1.8)
+            
+            # 設置標題顏色
+            for i in range(len(header)):
+                table[(0, i)].set_facecolor('#4CAF50')
+                table[(0, i)].set_text_props(weight='bold', color='white')
+            
+            # 設置行顏色（交替）並根據效益大小設置漸變色
+            max_benefit = max(treatment_overall_benefit.values()) if treatment_overall_benefit.values() else 1
+            min_benefit = min(treatment_overall_benefit.values()) if treatment_overall_benefit.values() else 0
+            
+            for i in range(1, len(table_data) + 1):
+                # 獲取該行治療的整體效益
+                treatment = all_treatments[i-1]
+                benefit = treatment_overall_benefit[treatment]
+                
+                # 計算顏色強度（效益越高，顏色越深）
+                if max_benefit > min_benefit:
+                    intensity = (benefit - min_benefit) / (max_benefit - min_benefit)
+                else:
+                    intensity = 0.5
+                
+                # 使用綠色系，效益越高越深
+                base_color = (0.9 - 0.3 * intensity, 0.95, 0.9 - 0.2 * intensity)
+                
                 for j in range(len(header)):
-                    table[(i, j)].set_facecolor('#f0f0f0')
-        
-        # 設置標題
-        plt.title("Treatment Effect by Stage\n(Average Benefit in Months after Multiple Experiments)", 
-                fontsize=14, pad=20, weight='bold')
-        
-        # 添加註解
-        plt.figtext(0.5, 0.02, 
-                    "Values show: mean±std (n=number of patients)\n"
-                    "Positive values indicate treatment benefit compared to no treatment",
-                    ha='center', fontsize=10, style='italic')
-        
-        # 儲存圖片
-        save_path = self.figures_dir / "whatif_treatment_table.png"
-        plt.savefig(save_path, bbox_inches='tight', dpi=300)
-        plt.close()
-        
-        # 同時儲存為CSV（包含平均值±標準差）
-        csv_data = {}
-        csv_data_mean = {}  # 單獨儲存平均值
-        csv_data_std = {}   # 單獨儲存標準差
-
-        for treatment in all_treatments:
-            csv_data[treatment] = {}
-            csv_data_mean[treatment] = {}
-            csv_data_std[treatment] = {}
+                    if j == 1:  # Overall Avg 欄位
+                        # 特別標記整體平均欄位
+                        table[(i, j)].set_facecolor((0.85, 0.85, 0.95))
+                        table[(i, j)].set_text_props(weight='bold')
+                    else:
+                        table[(i, j)].set_facecolor(base_color)
             
-            for stage in stages:
-                stage_patients = patient_avg[patient_avg["stage"] == stage]
-                with_treatment = stage_patients[
-                    stage_patients["current_treatments"].apply(lambda x: treatment in x if x else False)
-                ]
+            # 設置標題
+            plt.title("Treatment Effect by Stage (Sorted by Overall Average Benefit)\n"
+                    "(Average Benefit in Months after Multiple Experiments)", 
+                    fontsize=14, pad=20, weight='bold')
+            
+            # 添加註解
+            plt.figtext(0.5, 0.02, 
+                        "Values show: mean±std (n=number of patients)\n"
+                        "Positive values indicate treatment benefit compared to no treatment\n"
+                        "Treatments are sorted by overall average benefit (descending)",
+                        ha='center', fontsize=10, style='italic')
+            
+            # 儲存圖片
+            save_path = self.figures_dir / "whatif_treatment_table_sorted.png"
+            plt.savefig(save_path, bbox_inches='tight', dpi=300)
+            plt.close()
+            
+            # 同時儲存為CSV（包含平均值±標準差和整體平均）
+            csv_data = {}
+            csv_data_mean = {}  # 單獨儲存平均值
+            csv_data_std = {}   # 單獨儲存標準差
+
+            for treatment in all_treatments:  # 使用排序後的順序
+                csv_data[treatment] = {'Overall_Average': f"{treatment_overall_benefit[treatment]:.1f}"}
+                csv_data_mean[treatment] = {'Overall_Average': treatment_overall_benefit[treatment]}
+                csv_data_std[treatment] = {'Overall_Average': None}
                 
-                if len(with_treatment) > 0:
-                    mean_benefit = with_treatment["treatment_benefit_months"].mean()
-                    std_benefit = with_treatment["treatment_benefit_months"].std()
-                    n_patients = len(with_treatment)
+                for stage in stages:
+                    stage_patients = patient_avg[patient_avg["stage"] == stage]
+                    with_treatment = stage_patients[
+                        stage_patients["current_treatments"].apply(lambda x: treatment in x if x else False)
+                    ]
                     
-                    # 主要CSV：平均值±標準差 (n=樣本數)
-                    csv_data[treatment][f"Stage_{stage}"] = f"{mean_benefit:.1f}±{std_benefit:.1f} (n={n_patients})"
-                    
-                    # 額外CSV：分別儲存平均值和標準差
-                    csv_data_mean[treatment][f"Stage_{stage}"] = mean_benefit
-                    csv_data_std[treatment][f"Stage_{stage}"] = std_benefit
-                else:
-                    csv_data[treatment][f"Stage_{stage}"] = "N/A"
-                    csv_data_mean[treatment][f"Stage_{stage}"] = None
-                    csv_data_std[treatment][f"Stage_{stage}"] = None
+                    if len(with_treatment) > 0:
+                        mean_benefit = with_treatment["treatment_benefit_months"].mean()
+                        std_benefit = with_treatment["treatment_benefit_months"].std()
+                        n_patients = len(with_treatment)
+                        
+                        # 主要CSV：平均值±標準差 (n=樣本數)
+                        csv_data[treatment][f"Stage_{stage}"] = f"{mean_benefit:.1f}±{std_benefit:.1f} (n={n_patients})"
+                        
+                        # 額外CSV：分別儲存平均值和標準差
+                        csv_data_mean[treatment][f"Stage_{stage}"] = mean_benefit
+                        csv_data_std[treatment][f"Stage_{stage}"] = std_benefit
+                    else:
+                        csv_data[treatment][f"Stage_{stage}"] = "N/A"
+                        csv_data_mean[treatment][f"Stage_{stage}"] = None
+                        csv_data_std[treatment][f"Stage_{stage}"] = None
 
-        # 儲存主要CSV（包含完整統計資訊）
-        csv_df = pd.DataFrame.from_dict(csv_data, orient='index')
-        csv_path = self.figures_dir / "whatif_treatment_table.csv"
-        csv_df.to_csv(csv_path)
+            # 儲存主要CSV（包含完整統計資訊）
+            csv_df = pd.DataFrame.from_dict(csv_data, orient='index')
+            csv_path = self.figures_dir / "whatif_treatment_table_sorted.csv"
+            csv_df.to_csv(csv_path)
 
-        # 儲存純數值的CSV檔案（方便後續分析）
-        csv_df_mean = pd.DataFrame.from_dict(csv_data_mean, orient='index')
-        csv_path_mean = self.figures_dir / "whatif_treatment_table_mean.csv"
-        csv_df_mean.to_csv(csv_path_mean)
+            # 儲存純數值的CSV檔案（方便後續分析）
+            csv_df_mean = pd.DataFrame.from_dict(csv_data_mean, orient='index')
+            csv_path_mean = self.figures_dir / "whatif_treatment_table_sorted_mean.csv"
+            csv_df_mean.to_csv(csv_path_mean)
 
-        csv_df_std = pd.DataFrame.from_dict(csv_data_std, orient='index')
-        csv_path_std = self.figures_dir / "whatif_treatment_table_std.csv"
-        csv_df_std.to_csv(csv_path_std)
+            csv_df_std = pd.DataFrame.from_dict(csv_data_std, orient='index')
+            csv_path_std = self.figures_dir / "whatif_treatment_table_sorted_std.csv"
+            csv_df_std.to_csv(csv_path_std)
 
-        logger.info(f"What-if治療分析表格已儲存至: {save_path}")
-        logger.info(f"CSV檔案（完整統計）已儲存至: {csv_path}")
-        logger.info(f"CSV檔案（平均值）已儲存至: {csv_path_mean}")
-        logger.info(f"CSV檔案（標準差）已儲存至: {csv_path_std}")
+            logger.info(f"What-if治療分析表格（已排序）已儲存至: {save_path}")
+            logger.info(f"CSV檔案（完整統計）已儲存至: {csv_path}")
+            logger.info(f"CSV檔案（平均值）已儲存至: {csv_path_mean}")
+            logger.info(f"CSV檔案（標準差）已儲存至: {csv_path_std}")
 
     def plot_whatif_continuous_analysis(
         self,
