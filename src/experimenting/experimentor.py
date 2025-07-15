@@ -333,12 +333,13 @@ def _xgboost_full_experiment(
 
     train_predictions = model.predict(dtrain)
     test_predictions = model.predict(dtest)
+    train_predictions_leaf_indices = model.predict(dtrain, pred_leaf=True)
+    test_predictions_leaf_indices = model.predict(dtest, pred_leaf=True)
 
     train_c_index = concordance_index(y_lower_train, train_predictions, y_event_train)
     test_c_index = concordance_index(y_lower_test, test_predictions, y_event_test)
 
     train_predictions_df = _build_predictions_df(patient_id_train, train_predictions)
-
     test_predictions_df = _build_predictions_df(patient_id_test, test_predictions)
 
     # ===============================================
@@ -526,6 +527,7 @@ def _build_predictions_df(patient_ids, preds):
         }
     )
     return df
+
 
 
 # TODO: 待精簡
