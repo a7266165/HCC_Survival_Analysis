@@ -169,7 +169,7 @@ def _cox_full_experiment(
 
     patient_id_mapping = processed_df[feature_config.patient_id].copy()
     cph_df = processed_df.copy()
-    cph_df = cph_df.drop(columns=[feature_config.source, feature_config.patient_id])
+    cph_df = cph_df.drop(columns=[feature_config.source, feature_config.patient_id, feature_config.BCLC_stage])
 
     logger.info("開始訓練模型...")
     train_data, test_data = train_test_split(
@@ -269,7 +269,7 @@ def _xgboost_full_experiment(
 
     X = processed_df.drop(
         columns=list(feature_config.survival_labels)
-        + [feature_config.source, feature_config.patient_id]
+        + [feature_config.source, feature_config.patient_id, feature_config.BCLC_stage]
     )
     y = processed_df[list(feature_config.survival_labels)]
 
@@ -406,7 +406,7 @@ def _catboost_full_experiment(
 
     X = processed_df.drop(
         columns=list(feature_config.survival_labels)
-        + [feature_config.source, feature_config.patient_id]
+        + [feature_config.source, feature_config.patient_id, feature_config.BCLC_stage]
     )
     y = processed_df[list(feature_config.survival_labels)]
 
@@ -888,7 +888,6 @@ def _get_feature_columns(experiment_result: ExperimentResult) -> List[str]:
     logger.warning(f"無法從 {experiment_result.model_type} 模型中獲取特徵名稱")
     return []
 
-
 def _analyze_treatment_modifications(
     model: Any,
     model_type: str,
@@ -896,7 +895,7 @@ def _analyze_treatment_modifications(
     feature_cols: List[str],
     experiment_config: ExperimentConfig,
 ) -> Dict[str, pd.DataFrame]:
-    """分析治療方式修改的影響"""
+    """分析治療方式修改的影響：比較有治療與無治療的差異"""
     results = {}
 
     # 確認哪些治療在特徵中
@@ -932,7 +931,7 @@ def _analyze_treatment_modifications(
             patient_id = patient["patient_id"]
             X_original = patient[feature_cols].values.reshape(1, -1)
 
-            # 原始預測
+            # 原始預測（保持當前治療狀態）
             original_pred = _predict_with_model(
                 model, model_type, X_original, feature_cols
             )
@@ -942,49 +941,38 @@ def _analyze_treatment_modifications(
             # 記錄當前治療
             current_treatments = [t for t in available_treatments if patient[t] == 1]
 
-            # 測試每種治療
-            for treatment in available_treatments:
-                X_modified = X_original.copy()
+            # 創建無治療的情境：將所有治療特徵設為0
+            X_no_treatment = X_original.copy()
+            for idx, col in enumerate(feature_cols):
+                if col in available_treatments:
+                    X_no_treatment[0, idx] = 0.0
 
-                if (
-                    experiment_config.whatif_settings.treatment_mode
-                    == "single_treatment"
-                ):
-                    # 單一治療模式：關閉所有治療，只開啟目標治療
-                    for idx, col in enumerate(feature_cols):
-                        if col in available_treatments:
-                            X_modified[0, idx] = 1.0 if col == treatment else 0.0
-                else:
-                    # 組合模式：切換單一治療的開關
-                    treatment_idx = feature_cols.index(treatment)
-                    X_modified[0, treatment_idx] = 1.0 - X_original[0, treatment_idx]
+            # 預測無治療的結果
+            no_treatment_pred = _predict_with_model(
+                model, model_type, X_no_treatment, feature_cols
+            )
+            if no_treatment_pred is None:
+                continue
 
-                # 預測修改後的結果
-                modified_pred = _predict_with_model(
-                    model, model_type, X_modified, feature_cols
-                )
-                if modified_pred is None:
-                    continue
-
-                stage_results.append(
-                    {
-                        "patient_id": patient_id,
-                        "stage": stage,
-                        "current_treatments": current_treatments,
-                        "test_treatment": treatment,
-                        "original_prediction": original_pred,
-                        "modified_prediction": modified_pred,
-                        "change_months": modified_pred - original_pred,
-                        "change_percent": (
-                            ((modified_pred - original_pred) / original_pred * 100)
-                            if original_pred > 0
-                            else 0
-                        ),
-                    }
-                )
+            # 計算治療效果
+            stage_results.append(
+                {
+                    "patient_id": patient_id,
+                    "stage": stage,
+                    "current_treatments": current_treatments,
+                    "with_treatment_prediction": original_pred,
+                    "no_treatment_prediction": no_treatment_pred,
+                    "treatment_benefit_months": original_pred - no_treatment_pred,
+                    "treatment_benefit_percent": (
+                        ((original_pred - no_treatment_pred) / no_treatment_pred * 100)
+                        if no_treatment_pred > 0
+                        else 0
+                    ),
+                }
+            )
 
         if stage_results:
-            results[f"treatment_stage_{stage}"] = pd.DataFrame(stage_results)
+            results[f"treatment_effect_stage_{stage}"] = pd.DataFrame(stage_results)
 
     # 移除臨時欄位
     if "temp_stage" in test_df.columns:

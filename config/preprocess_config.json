@@ -1,6 +1,6 @@
 {
     "is_preprocess": false,
-    "impute_method": "median",
+    "impute_method": "zero",
     "is_augment": true,
     "augment_times": 5
 }

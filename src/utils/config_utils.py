@@ -79,6 +79,7 @@ class FeatureConfig:
     survival_labels: Tuple[str, ...]
     source: str
     patient_id: str
+    BCLC_stage: str
 
     @classmethod
     def from_dict(cls, cfg: dict) -> "FeatureConfig":
@@ -90,6 +91,7 @@ class FeatureConfig:
             survival_labels=tuple(cfg["survival_labels"]),
             source=cfg["source"],
             patient_id=cfg["patient_id"],
+            BCLC_stage=cfg["BCLC_stage"]
         )
 
 

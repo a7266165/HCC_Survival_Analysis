@@ -59,5 +59,6 @@
         "time"
     ],
     "source": "hospital",
-    "patient_id": "patient_id"
+    "patient_id": "patient_id",
+    "BCLC_stage": "BCLC_stage"
     }

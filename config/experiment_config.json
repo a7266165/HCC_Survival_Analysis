@@ -1,6 +1,6 @@
 {
   "experiment_settings": {
-    "num_experiments": 10,
+    "num_experiments": 100,
     "models_to_train": [
       "CoxPHFitter",
       "XGBoost_AFT",
