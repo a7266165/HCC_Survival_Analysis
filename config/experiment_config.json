@@ -2,9 +2,7 @@
   "experiment_settings": {
     "num_experiments": 100,
     "models_to_train": [
-      "CoxPHFitter",
-      "XGBoost_AFT",
-      "CatBoost"
+      "XGBoost_AFT"
     ],
     "calibration_methods": [
       "knn_km",
@@ -64,6 +62,7 @@
         "max_value": null
       }
     },
+    "analyze_categorical": true,
     "save_individual": false,
     "save_summary": true,
     "create_plots": true
