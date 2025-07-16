@@ -285,7 +285,7 @@ class EnsembleAnalyzer:
         metrics = {}
 
         for key, pred_df in self._ensemble_predictions.items():
-            calibration_methods = ["knn_km", "regression", "segmental", "curve"]
+            calibration_methods = ["knn_km", "regression", "segmental", "curve", "leaf_similarity"]
             model_type = key
             calibration_method = "original"
 
@@ -364,7 +364,7 @@ class EnsembleAnalyzer:
         if self._ensemble_predictions is None:
             raise ValueError("必須先生成ensemble預測")
 
-        calibration_methods = ["knn_km", "regression", "segmental", "curve"]
+        calibration_methods = ["knn_km", "regression", "segmental", "curve", "leaf_similarity"]
         true = processed_df[["patient_id", "time", "event"]]
         results: Dict[str, Dict[str, Any]] = {}
 

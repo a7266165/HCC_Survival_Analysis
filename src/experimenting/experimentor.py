@@ -10,7 +10,7 @@ from utils.config_utils import (
 )
 from lifelines.utils import concordance_index
 import shap
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 from pathlib import Path
 import pickle
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExperimentResult:
     """封裝實驗及校正結果"""
-
+    
     model_type: str
     train_predictions: pd.DataFrame
     test_predictions: pd.DataFrame
@@ -39,6 +39,8 @@ class ExperimentResult:
     calibrated_test_c_index: Dict[str, float] = field(default_factory=dict)
     whatif_treatment_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
     whatif_continuous_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
+    train_leaf_indices: Optional[np.ndarray] = None
+    test_leaf_indices: Optional[np.ndarray] = None
 
 
 # ========================================
@@ -333,8 +335,8 @@ def _xgboost_full_experiment(
 
     train_predictions = model.predict(dtrain)
     test_predictions = model.predict(dtest)
-    train_predictions_leaf_indices = model.predict(dtrain, pred_leaf=True)
-    test_predictions_leaf_indices = model.predict(dtest, pred_leaf=True)
+    train_leaf_indices = model.predict(dtrain, pred_leaf=True)
+    test_leaf_indices = model.predict(dtest, pred_leaf=True)
 
     train_c_index = concordance_index(y_lower_train, train_predictions, y_event_train)
     test_c_index = concordance_index(y_lower_test, test_predictions, y_event_test)
@@ -392,6 +394,8 @@ def _xgboost_full_experiment(
         model=model,
         shap_results=shap_results,
         feature_importance=feature_importance,
+        train_leaf_indices=train_leaf_indices,
+        test_leaf_indices=test_leaf_indices,
     )
 
 
@@ -737,11 +741,172 @@ def _calibrate_predictions_curve(
 
     return result_df[["patient_id", "calibrated_prediction"]]
 
+def _calibrate_predictions_leaf_similarity(
+    train_predictions: pd.DataFrame,
+    test_predictions: pd.DataFrame,
+    train_labels: pd.DataFrame,
+    test_labels: pd.DataFrame,
+    train_leaf_indices: np.ndarray,
+    test_leaf_indices: np.ndarray,
+    k: int = 200,
+) -> pd.DataFrame:
+    """
+    校正法五: XGBoost葉子索引相似度校正
+    使用葉子索引內積作為相似度，找到最相似的k個訓練樣本，
+    使用KM curve計算中位生存時間作為校正值
+    """
+    # 合併訓練和測試數據
+    train_merged = pd.merge(
+        train_predictions, train_labels, on="patient_id", how="inner"
+    )
+    test_merged = pd.merge(test_predictions, test_labels, on="patient_id", how="inner")
+    
+    # 檢查葉子索引是否可用
+    if train_leaf_indices is None or test_leaf_indices is None:
+        logger.warning("葉子索引不可用，返回原始預測")
+        return test_predictions[["patient_id", "predicted_survival_time"]].rename(
+            columns={"predicted_survival_time": "calibrated_prediction"}
+        )
+    
+    # 將葉子索引轉換為one-hot編碼（稀疏表示）
+    from sklearn.preprocessing import OneHotEncoder
+    
+    # 合併訓練和測試的葉子索引以確保編碼一致
+    all_leaf_indices = np.vstack([train_leaf_indices, test_leaf_indices])
+    
+    # 使用OneHotEncoder
+    encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    encoder.fit(all_leaf_indices)
+    
+    # 轉換訓練和測試集
+    train_leaf_onehot = encoder.transform(train_leaf_indices)
+    test_leaf_onehot = encoder.transform(test_leaf_indices)
+    
+    calibrated_predictions = []
+    
+    # 對每個測試樣本進行校正
+    for idx, (test_idx, test_row) in enumerate(test_merged.iterrows()):
+        # 計算當前測試樣本與所有訓練樣本的相似度（內積）
+        test_vector = test_leaf_onehot[idx]
+        similarities = train_leaf_onehot.dot(test_vector)
+        
+        # 找到最相似的k個訓練樣本
+        top_k_indices = np.argsort(similarities)[-k:][::-1]
+        neighbor_data = train_merged.iloc[top_k_indices]
+        
+        # 使用KM curve計算中位生存時間
+        kmf = KaplanMeierFitter()
+        
+        try:
+            # 確保有足夠的數據
+            if len(neighbor_data) < 5:
+                # 如果鄰居太少，使用原始預測
+                calibrated_pred = test_row["predicted_survival_time"]
+            else:
+                kmf.fit(neighbor_data["time"], neighbor_data["event"])
+                median_survival = kmf.median_survival_time_
+                
+                if pd.isna(median_survival) or np.isinf(median_survival):
+                    # 如果無法計算中位生存時間，使用鄰居的平均預測值
+                    median_survival = neighbor_data["predicted_survival_time"].mean()
+                    if pd.isna(median_survival) or np.isinf(median_survival):
+                        median_survival = test_row["predicted_survival_time"]
+                
+                calibrated_pred = median_survival
+        except Exception as e:
+            logger.warning(f"KM擬合失敗，使用原始預測: {e}")
+            calibrated_pred = test_row["predicted_survival_time"]
+        
+        calibrated_predictions.append(calibrated_pred)
+    
+    # 建立結果DataFrame
+    result_df = test_merged[["patient_id"]].copy()
+    result_df["calibrated_prediction"] = calibrated_predictions
+    
+    return result_df[["patient_id", "calibrated_prediction"]]
 
 # TODO: 待精簡
 # ========================================
 # 統一的校正管理器
 # ========================================
+# def apply_calibration_to_experiment(
+#     experiment_result: ExperimentResult,
+#     processed_df: pd.DataFrame,
+#     experiment_config: ExperimentConfig,
+# ) -> None:
+#     """
+#     對單個實驗結果應用多種校正方法
+#     直接更新 experiment_result 物件
+#     """
+#     # 準備標籤數據
+#     train_ids = experiment_result.train_predictions["patient_id"].unique()
+#     test_ids = experiment_result.test_predictions["patient_id"].unique()
+
+#     train_labels = processed_df[processed_df["patient_id"].isin(train_ids)][
+#         ["patient_id", "time", "event"]
+#     ]
+#     test_labels = processed_df[processed_df["patient_id"].isin(test_ids)][
+#         ["patient_id", "time", "event"]
+#     ]
+
+#     # 校正方法映射
+#     calibration_functions = {
+#         "knn_km": _calibrate_predictions_knn_km,
+#         "regression": _calibrate_predictions_regression,
+#         "segmental": _calibrate_predictions_segmental,
+#         "curve": _calibrate_predictions_curve,
+#     }
+
+#     # 應用每種校正方法
+#     calibration_methods = list(
+#         experiment_config.experiment_settings.calibration_methods
+#     )
+#     for method in calibration_methods:
+#         if method not in calibration_functions:
+#             logger.warning(f"未知的校正方法: {method}")
+#             continue
+
+#         try:
+#             # 執行校正
+#             calibrated_df = calibration_functions[method](
+#                 experiment_result.train_predictions,
+#                 experiment_result.test_predictions,
+#                 train_labels,
+#                 test_labels,
+#             )
+
+#             # 合併校正結果與原始預測
+#             calibrated_test = experiment_result.test_predictions.merge(
+#                 calibrated_df[["patient_id", "calibrated_prediction"]],
+#                 on="patient_id",
+#                 how="left",
+#             )
+
+#             # 使用校正後的預測值
+#             calibrated_test["predicted_survival_time"] = calibrated_test[
+#                 "calibrated_prediction"
+#             ].fillna(calibrated_test["predicted_survival_time"])
+#             calibrated_test = calibrated_test.drop(columns=["calibrated_prediction"])
+
+#             # 儲存校正結果
+#             experiment_result.calibrated_test_predictions[method] = calibrated_test
+
+#             # 計算校正後的C-index
+#             test_merged = calibrated_test.merge(
+#                 test_labels, on="patient_id", how="inner"
+#             )
+#             if len(test_merged) > 0:
+#                 c_index = concordance_index(
+#                     test_merged["time"],
+#                     test_merged["predicted_survival_time"],
+#                     test_merged["event"],
+#                 )
+#                 experiment_result.calibrated_test_c_index[method] = c_index
+
+#         except Exception as e:
+#             logger.error(f"應用 {method} 校正時發生錯誤: {str(e)}")
+#             continue
+
 def apply_calibration_to_experiment(
     experiment_result: ExperimentResult,
     processed_df: pd.DataFrame,
@@ -768,12 +933,20 @@ def apply_calibration_to_experiment(
         "regression": _calibrate_predictions_regression,
         "segmental": _calibrate_predictions_segmental,
         "curve": _calibrate_predictions_curve,
+        "leaf_similarity": _calibrate_predictions_leaf_similarity,
     }
 
     # 應用每種校正方法
     calibration_methods = list(
         experiment_config.experiment_settings.calibration_methods
     )
+    
+    # 如果是XGBoost模型且有葉子索引，自動添加leaf_similarity校正
+    if (experiment_result.model_type == "XGBoost_AFT" and 
+        experiment_result.train_leaf_indices is not None and
+        "leaf_similarity" not in calibration_methods):
+        calibration_methods.append("leaf_similarity")
+    
     for method in calibration_methods:
         if method not in calibration_functions:
             logger.warning(f"未知的校正方法: {method}")
@@ -781,12 +954,23 @@ def apply_calibration_to_experiment(
 
         try:
             # 執行校正
-            calibrated_df = calibration_functions[method](
-                experiment_result.train_predictions,
-                experiment_result.test_predictions,
-                train_labels,
-                test_labels,
-            )
+            if method == "leaf_similarity":
+                # 特殊處理葉子相似度校正
+                calibrated_df = calibration_functions[method](
+                    experiment_result.train_predictions,
+                    experiment_result.test_predictions,
+                    train_labels,
+                    test_labels,
+                    experiment_result.train_leaf_indices,
+                    experiment_result.test_leaf_indices,
+                )
+            else:
+                calibrated_df = calibration_functions[method](
+                    experiment_result.train_predictions,
+                    experiment_result.test_predictions,
+                    train_labels,
+                    test_labels,
+                )
 
             # 合併校正結果與原始預測
             calibrated_test = experiment_result.test_predictions.merge(
@@ -819,7 +1003,6 @@ def apply_calibration_to_experiment(
         except Exception as e:
             logger.error(f"應用 {method} 校正時發生錯誤: {str(e)}")
             continue
-
 
 # TODO: 待精簡
 # ========================================

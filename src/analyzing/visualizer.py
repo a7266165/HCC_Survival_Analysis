@@ -561,13 +561,13 @@ class SurvivalVisualizer:
         models = [m for m in all_predictions["model_type"].unique()]
 
         # 校正方法
-        calibration_methods = ["knn_km", "regression", "segmental", "curve"]
+        calibration_methods = ["knn_km", "regression", "segmental", "curve", "leaf_similarity"]
 
         # 設定圖片大小 - 現在需要顯示訓練集和測試集
         if figsize is None:
             figsize = (16, 8 * len(models))  # 每個模型需要兩行
 
-        fig, axes = plt.subplots(len(models) * 2, 4, figsize=figsize)
+        fig, axes = plt.subplots(len(models) * 2, len(calibration_methods), figsize=figsize)
         if len(models) == 1:
             axes = axes.reshape(2, -1)
 
