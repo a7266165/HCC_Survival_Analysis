@@ -1149,6 +1149,260 @@ class SurvivalVisualizer:
 
         logger.info(f"What-if連續特徵分析圖已儲存至: {save_path}")
 
+    def plot_whatif_categorical_analysis(
+        self,
+        figsize: Optional[tuple] = None,
+    ) -> None:
+        """
+        視覺化What-if類別特徵分析結果 - 每個特徵獨立一張表
+        """
+        if self.experiment_results is None:
+            logger.warning("需要 experiment_results 才能繪製What-if類別特徵分析")
+            return
+
+        logger.info("生成What-if類別特徵分析表格...")
+
+        # 收集所有類別特徵分析結果
+        categorical_results = {}
+
+        for result in self.experiment_results:
+            if result and hasattr(result, 'whatif_categorical_results') and result.whatif_categorical_results:
+                for analysis_name, df in result.whatif_categorical_results.items():
+                    feature_name = analysis_name.replace("categorical_", "")
+                    
+                    if feature_name not in categorical_results:
+                        categorical_results[feature_name] = []
+                    
+                    df_copy = df.copy()
+                    df_copy["model_type"] = result.model_type
+                    categorical_results[feature_name].append(df_copy)
+
+        if not categorical_results:
+            logger.warning("沒有找到What-if類別特徵分析結果")
+            return
+
+        # 為每個特徵生成獨立的表格
+        for feature_name, feature_dfs in categorical_results.items():
+            self._plot_single_categorical_feature(feature_name, feature_dfs, figsize)
+
+    def _plot_single_categorical_feature(
+        self,
+        feature_name: str,
+        feature_dfs: List[pd.DataFrame],
+        figsize: Optional[tuple] = None,
+    ) -> None:
+        """為單個類別特徵生成分析表格"""
+        # 合併所有結果
+        combined_df = pd.concat(feature_dfs, ignore_index=True)
+        
+        # 獲取所有轉換類型
+        change_columns = [col for col in combined_df.columns if col.startswith("from_") and col.endswith("_change_months")]
+        transitions = []
+        
+        for col in change_columns:
+            # 從 "from_X_to_Y_change_months" 提取 "X→Y"
+            parts = col.replace("_change_months", "").split("_")
+            if len(parts) == 4:  # from_X_to_Y
+                try:
+                    # 確保 X 和 Y 都是有效的數值（不是 'nan' 字串）
+                    from_val = parts[1]
+                    to_val = parts[3]
+                    # 檢查是否為有效的數值（不是 'nan' 字串）
+                    if from_val.lower() != 'nan' and to_val.lower() != 'nan':
+                        transition = f"{from_val}→{to_val}"
+                        if transition not in transitions:
+                            transitions.append(transition)
+                except:
+                    continue
+        
+        if not transitions:
+            logger.warning(f"特徵 {feature_name} 沒有找到有效的轉換")
+            return
+        
+        # 獲取所有分期
+        stages = sorted(combined_df["stage"].unique())
+        
+        # 對同一個patient_id的多次實驗結果取平均
+        # 構建用於聚合的列
+        agg_dict = {}
+        for transition in transitions:
+            col_name = f"from_{transition.split('→')[0]}_to_{transition.split('→')[1]}_change_months"
+            if col_name in combined_df.columns:
+                agg_dict[col_name] = 'mean'
+        
+        patient_avg = combined_df.groupby(['patient_id', 'stage', 'original_value']).agg(agg_dict).reset_index()
+        
+        # 計算每個轉換的整體平均改良幅度（用於排序）
+        transition_overall_benefit = {}
+        
+        for transition in transitions:
+            col_name = f"from_{transition.split('→')[0]}_to_{transition.split('→')[1]}_change_months"
+            if col_name in patient_avg.columns:
+                all_benefits = patient_avg[col_name].dropna().values
+                if len(all_benefits) > 0:
+                    transition_overall_benefit[transition] = np.mean(all_benefits)
+                else:
+                    transition_overall_benefit[transition] = 0
+            else:
+                transition_overall_benefit[transition] = 0
+        
+        # 根據整體平均效益排序（降序）
+        transitions = sorted(transitions, 
+                           key=lambda x: transition_overall_benefit.get(x, 0), 
+                           reverse=True)
+        
+        # 創建結果字典
+        results_dict = {}
+        
+        for transition in transitions:
+            results_dict[transition] = {}
+            from_val, to_val = transition.split('→')
+            col_name = f"from_{from_val}_to_{to_val}_change_months"
+            
+            for stage in stages:
+                # 篩選該分期且原始值符合的病人
+                try:
+                    from_val_int = int(from_val)
+                    stage_patients = patient_avg[
+                        (patient_avg["stage"] == stage) & 
+                        (patient_avg["original_value"] == from_val_int)
+                    ]
+                except ValueError:
+                    # 如果無法轉換為整數，跳過
+                    results_dict[transition][f"Stage_{stage}"] = "N/A"
+                    continue
+                
+                if len(stage_patients) > 0 and col_name in stage_patients.columns:
+                    values = stage_patients[col_name].dropna()
+                    if len(values) > 0:
+                        mean_benefit = values.mean()
+                        std_benefit = values.std()
+                        n_patients = len(values)
+                        
+                        # 格式化顯示
+                        results_dict[transition][f"Stage_{stage}"] = f"{mean_benefit:.1f}±{std_benefit:.1f} (n={n_patients})"
+                    else:
+                        results_dict[transition][f"Stage_{stage}"] = "N/A"
+                else:
+                    results_dict[transition][f"Stage_{stage}"] = "N/A"
+        
+        # 創建DataFrame
+        results_df = pd.DataFrame.from_dict(results_dict, orient='index')
+        
+        # 確保欄位順序正確
+        column_order = [f"Stage_{s}" for s in stages]
+        results_df = results_df[column_order]
+        
+        # 設定圖片大小
+        if figsize is None:
+            figsize = (14, max(6, len(transitions) * 0.8))
+        
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.axis('tight')
+        ax.axis('off')
+        
+        # 準備表格數據
+        table_data = []
+        
+        # 添加標題行
+        if stages == ["all"]:
+            header = ['Transition', 'Overall Avg', 'All Patients']
+        else:
+            header = ['Transition', 'Overall Avg'] + [f'Stage {s}' for s in stages]
+        
+        # 添加數據行
+        for transition in transitions:
+            row = [transition]
+            # 添加整體平均效益
+            overall_avg = transition_overall_benefit.get(transition, 0)
+            row.append(f"{overall_avg:.1f}")
+            # 添加各分期數據
+            if stages == ["all"]:
+                row.append(results_df.loc[transition, "Stage_all"])
+            else:
+                for stage in stages:
+                    row.append(results_df.loc[transition, f"Stage_{stage}"])
+            table_data.append(row)
+        
+        # 創建表格
+        table = ax.table(cellText=table_data, 
+                        colLabels=header,
+                        cellLoc='center',
+                        loc='center',
+                        colWidths=[0.15, 0.12] + [0.146] * len(stages))
+        
+        # 設置表格樣式
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.2, 1.8)
+        
+        # 設置標題顏色
+        for i in range(len(header)):
+            table[(0, i)].set_facecolor('#2196F3')
+            table[(0, i)].set_text_props(weight='bold', color='white')
+        
+        # 設置行顏色（根據效益大小）
+        max_benefit = max(transition_overall_benefit.values()) if transition_overall_benefit.values() else 1
+        min_benefit = min(transition_overall_benefit.values()) if transition_overall_benefit.values() else 0
+        
+        for i in range(1, len(table_data) + 1):
+            transition = transitions[i-1]
+            benefit = transition_overall_benefit.get(transition, 0)
+            
+            # 計算顏色強度
+            if max_benefit > min_benefit:
+                intensity = (benefit - min_benefit) / (max_benefit - min_benefit)
+            else:
+                intensity = 0.5
+            
+            # 根據效益正負使用不同顏色
+            if benefit > 0:
+                # 正效益：綠色系
+                base_color = (0.9 - 0.3 * intensity, 0.95, 0.9 - 0.2 * intensity)
+            else:
+                # 負效益：紅色系
+                base_color = (0.95, 0.9 - 0.3 * abs(intensity), 0.9 - 0.2 * abs(intensity))
+            
+            for j in range(len(header)):
+                if j == 1:  # Overall Avg 欄位
+                    table[(i, j)].set_facecolor((0.85, 0.85, 0.95))
+                    table[(i, j)].set_text_props(weight='bold')
+                else:
+                    table[(i, j)].set_facecolor(base_color)
+        
+        # 設置標題
+        feature_display_name = feature_name.replace('_', ' ').upper()
+        plt.title(f"Categorical Feature Analysis: {feature_display_name}\n"
+                 "(Sorted by Overall Average Benefit)", 
+                 fontsize=14, pad=20, weight='bold')
+        
+        # 添加註解
+        plt.figtext(0.5, 0.02, 
+                    "Values show: mean±std (n=number of patients)\n"
+                    "Positive values indicate improvement after category change\n"
+                    "Transitions are sorted by overall average benefit (descending)",
+                    ha='center', fontsize=10, style='italic')
+        
+        # 儲存圖片
+        save_path = self.figures_dir / f"whatif_categorical_{feature_name}_table.png"
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
+        plt.close()
+        
+        # 同時儲存為CSV
+        csv_data = {}
+        for transition in transitions:
+            csv_data[transition] = {'Overall_Average': f"{transition_overall_benefit.get(transition, 0):.1f}"}
+            
+            for stage in stages:
+                csv_data[transition][f"Stage_{stage}"] = results_df.loc[transition, f"Stage_{stage}"]
+        
+        csv_df = pd.DataFrame.from_dict(csv_data, orient='index')
+        csv_path = self.figures_dir / f"whatif_categorical_{feature_name}_table.csv"
+        csv_df.to_csv(csv_path)
+        
+        logger.info(f"類別特徵 {feature_name} 分析表格已儲存至: {save_path}")
+        logger.info(f"CSV檔案已儲存至: {csv_path}")
+
     def _plot_feature_effect_curve(
         self, df: pd.DataFrame, feature_name: str, ax: plt.Axes
     ) -> None:

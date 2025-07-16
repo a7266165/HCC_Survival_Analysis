@@ -74,6 +74,7 @@ class PathConfig:
 class FeatureConfig:
     num_features: Tuple[str, ...]
     cat_features: Tuple[str, ...]
+    ordinal_features: Dict[str, Dict[str, Any]]
     keep_features: Tuple[str, ...]
     treatments: Tuple[str, ...]
     survival_labels: Tuple[str, ...]
@@ -86,12 +87,13 @@ class FeatureConfig:
         return FeatureConfig(
             num_features=tuple(cfg["num_features"]),
             cat_features=tuple(cfg["cat_features"]),
+            ordinal_features=cfg.get("ordinal_features", {}),
             keep_features=tuple(cfg["keep_features"]),
             treatments=tuple(cfg["treatments"]),
             survival_labels=tuple(cfg["survival_labels"]),
             source=cfg["source"],
             patient_id=cfg["patient_id"],
-            BCLC_stage=cfg["BCLC_stage"]
+            BCLC_stage=cfg["BCLC_stage"],
         )
 
 
@@ -155,6 +157,9 @@ class WhatIfSettings:
     analyze_continuous: bool
     continuous_features: Dict[str, Dict[str, Any]]
 
+    # 類別特徵分析
+    analyze_categorical: bool
+
     # 輸出設定
     save_individual: bool
     save_summary: bool
@@ -170,6 +175,7 @@ class WhatIfSettings:
             stage_column=cfg.get("stage_column", "BCLC_stage"),
             analyze_continuous=cfg.get("analyze_continuous", True),
             continuous_features=cfg.get("continuous_features", {}),
+            analyze_categorical=cfg.get("analyze_categorical", True),
             save_individual=cfg.get("save_individual", False),
             save_summary=cfg.get("save_summary", True),
             create_plots=cfg.get("create_plots", True),

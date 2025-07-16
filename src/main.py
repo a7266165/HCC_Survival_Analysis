@@ -118,6 +118,9 @@ def main():
     # What-if 連續特徵分析視覺化
     visualizer.plot_whatif_continuous_analysis()
 
+    # What-if 類別特徵分析視覺化
+    visualizer.plot_whatif_categorical_analysis()
+
     # 時間序列預測分析
     visualizer.plot_temporal_prediction_analysis(time_bins=10)  # 將時間分成10個區間
 

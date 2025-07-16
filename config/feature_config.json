@@ -30,8 +30,7 @@
         "CKD",
         "ascites",
         "tumor_distribution",
-        "encephalopathy",
-        "BCLC_stage"
+        "encephalopathy"
     ],
     "keep_features": [
         "sex",
@@ -43,6 +42,20 @@
         "lymphonodules",
         "MVI"
     ],
+    "ordinal_features": {
+        "PS": {
+            "categories": [0, 1, 2, 3, 4],
+            "adjacent_only": true
+        },
+        "ascites": {
+            "categories": [1, 2, 3],
+            "adjacent_only": true
+        }, 
+        "childPugh_class": {
+            "categories": [0, 1, 2],
+            "adjacent_only": true
+        }
+    },
     "treatments": [
         "liver_transplantation",
         "surgical_resection",

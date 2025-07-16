@@ -39,6 +39,7 @@ class ExperimentResult:
     calibrated_test_c_index: Dict[str, float] = field(default_factory=dict)
     whatif_treatment_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
     whatif_continuous_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
+    whatif_categorical_results: Dict[str, pd.DataFrame] = field(default_factory=dict)
     train_leaf_indices: Optional[np.ndarray] = None
     test_leaf_indices: Optional[np.ndarray] = None
 
@@ -981,6 +982,18 @@ def apply_whatif_analysis(
         experiment_result.whatif_continuous_results = continuous_results
         logger.info(f"完成 {len(continuous_results)} 個連續特徵分析")
 
+    # 3. 類別特徵分析
+    logger.info("執行類別特徵 What-if 分析...")
+    categorical_results = _analyze_categorical_modifications(
+        model,
+        model_type,
+        test_df,
+        feature_cols,
+        experiment_config,
+    )
+    experiment_result.whatif_categorical_results = categorical_results
+    logger.info(f"完成 {len(categorical_results)} 個類別特徵分析")
+
 
 def _get_feature_columns(experiment_result: ExperimentResult) -> List[str]:
     """
@@ -1163,6 +1176,132 @@ def _analyze_continuous_modifications(
 
     return results
 
+
+def _analyze_categorical_modifications(
+    model: Any,
+    model_type: str,
+    test_df: pd.DataFrame,
+    feature_cols: List[str],
+    experiment_config: ExperimentConfig,
+) -> Dict[str, pd.DataFrame]:
+    """分析類別特徵修改的影響"""
+    results = {}
+    
+    # 從配置中獲取特徵信息
+    from utils.config_utils import load_config
+    feature_config = load_config("feature_config")
+    
+    # 獲取所有類別特徵（排除治療特徵）
+    cat_features = [f for f in feature_config.cat_features 
+                   if f in feature_cols and f not in feature_config.treatments]
+    
+    if not cat_features:
+        logger.warning("沒有可用的類別特徵")
+        return results
+    
+    # 有序特徵配置
+    ordinal_features = feature_config.ordinal_features
+    
+    # 檢查是否可以按期別分層
+    stage_column = experiment_config.whatif_settings.stage_column
+    if experiment_config.whatif_settings.stratify_by_stage and stage_column in test_df.columns:
+        stages = sorted(test_df[stage_column].unique())
+    else:
+        # 如果沒有 BCLC_stage 欄位，創建一個 "all" 分組
+        stages = ["all"]
+        test_df = test_df.copy()  # 創建副本以避免修改原始數據
+        test_df[stage_column] = "all"
+    
+    # 對每個類別特徵進行分析
+    for feature in cat_features:
+        feature_results = []
+        
+        # 對每個期別分析
+        for stage in stages:
+            stage_df = test_df[test_df[stage_column] == stage]
+            if stage_df.empty:
+                continue
+                
+            for _, patient in stage_df.iterrows():
+                patient_id = patient["patient_id"]
+                X_original = patient[feature_cols].values.reshape(1, -1)
+                feature_idx = feature_cols.index(feature)
+                original_value = X_original[0, feature_idx]
+                
+                # 檢查是否為 NaN，如果是則跳過這個病人
+                if pd.isna(original_value):
+                    continue
+
+                # 原始預測
+                original_pred = _predict_with_model(model, model_type, X_original, feature_cols)
+                if original_pred is None:
+                    continue
+                
+                # 決定要測試的值
+                test_values = []
+                
+                if feature in ordinal_features:
+                    # 有序特徵：只測試相鄰類別
+                    categories = ordinal_features[feature]["categories"]
+                    current_idx = categories.index(int(original_value)) if int(original_value) in categories else -1
+                    
+                    if current_idx >= 0:
+                        # 添加相鄰的類別
+                        if current_idx > 0:
+                            test_values.append(categories[current_idx - 1])
+                        if current_idx < len(categories) - 1:
+                            test_values.append(categories[current_idx + 1])
+                else:
+                    # 二元特徵：測試 0 和 1
+                    test_values = [0, 1]
+                
+                # 測試每個值的效果
+                modifications = {}
+                
+                for test_value in test_values:
+                    if test_value != original_value:
+                        X_modified = X_original.copy()
+                        X_modified[0, feature_idx] = test_value
+                        
+                        # 預測修改後的結果
+                        modified_pred = _predict_with_model(model, model_type, X_modified, feature_cols)
+                        if modified_pred is None:
+                            continue
+                        
+                        # 計算變化
+                        change = modified_pred - original_pred
+                        change_percent = (change / original_pred * 100) if original_pred > 0 else 0
+                        
+                        # 儲存結果
+                        modifications[f"from_{int(original_value)}_to_{int(test_value)}"] = {
+                            "new_value": test_value,
+                            "new_prediction": modified_pred,
+                            "change_months": change,
+                            "change_percent": change_percent
+                        }
+                
+                # 組合結果
+                if modifications:
+                    result_row = {
+                        "patient_id": patient_id,
+                        "stage": stage,
+                        "feature": feature,
+                        "original_value": int(original_value),
+                        "original_prediction": original_pred,
+                    }
+                    
+                    # 添加所有修改結果
+                    for mod_key, mod_values in modifications.items():
+                        for value_key, value in mod_values.items():
+                            result_row[f"{mod_key}_{value_key}"] = value
+                    
+                    feature_results.append(result_row)
+        
+        # 儲存該特徵的結果
+        if feature_results:
+            results[f"categorical_{feature}"] = pd.DataFrame(feature_results)
+    
+    return results
 
 def _predict_with_model(
     model: Any, model_type: str, X: np.ndarray, feature_names: List[str] = None
